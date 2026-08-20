@@ -6,15 +6,16 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --import tsx --conditions=react-server --test \"src/**/*.test.ts\"",
+    "test:watch": "node --import tsx --conditions=react-server --test --watch \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.120.0",
     "@react-pdf/renderer": "^4.6.1",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
-    "framer-motion": "^13.1.0",
-    "next": "16.3.0",
+    "framer-motion": "^13.1.1",
+    "next": "^16.3.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "^0.0.1",
@@ -22,13 +23,13 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^24.13.3",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.12",
-    "typescript": "^5"
+    "typescript": "^6.0.3"
   }
 }
