@@ -146,3 +146,63 @@ create policy "candidatura: atualizar as proprias" on public.applications
 drop policy if exists "candidatura: apagar as proprias" on public.applications;
 create policy "candidatura: apagar as proprias" on public.applications
   for delete using (auth.uid() = owner_id);
+
+
+-- Uso e cache da IA ----------------------------------------------------------
+--
+-- Uma tabela só serve a dois propósitos, e isso é deliberado:
+--
+--   1. LIMITE DE USO — contar quantas chamadas o usuário fez na janela. Um
+--      contador em memória não serviria: em plataforma serverless cada
+--      requisição pode cair num processo diferente, e o contador zeraria
+--      sozinho, deixando o limite como decoração.
+--
+--   2. CACHE — devolver a resposta guardada quando a mesma pergunta se repete.
+--      Servir do cache NÃO cria linha nova, logo repetir a pergunta não
+--      consome cota.
+--
+-- O texto de entrada NÃO é gravado aqui: só o fingerprint, que é um sha256. O
+-- currículo já mora em public.resumes e não precisa de uma segunda cópia
+-- espalhada. O `result` guarda a saída já validada por schema, e é conteúdo
+-- derivado do currículo — por isso a exclusão de conta apaga esta tabela junto.
+
+create table if not exists public.ai_calls (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users (id) on delete cascade,
+  task text not null,
+  fingerprint text not null,
+  result jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+-- As duas consultas do produto são "contar por dono na janela" e "achar por
+-- dono + fingerprint na janela". Este índice atende as duas: o prefixo
+-- (owner_id, created_at) serve a contagem, e o fingerprint entra depois.
+create index if not exists ai_calls_owner_created_idx
+  on public.ai_calls (owner_id, created_at desc);
+
+create index if not exists ai_calls_lookup_idx
+  on public.ai_calls (owner_id, fingerprint, created_at desc);
+
+alter table public.ai_calls enable row level security;
+
+drop policy if exists "ia: ler as proprias" on public.ai_calls;
+create policy "ia: ler as proprias" on public.ai_calls
+  for select using (auth.uid() = owner_id);
+
+drop policy if exists "ia: registrar para si" on public.ai_calls;
+create policy "ia: registrar para si" on public.ai_calls
+  for insert with check (auth.uid() = owner_id);
+
+drop policy if exists "ia: apagar as proprias" on public.ai_calls;
+create policy "ia: apagar as proprias" on public.ai_calls
+  for delete using (auth.uid() = owner_id);
+
+-- NÃO existe policy de update, e a falta é intencional: um registro de uso que
+-- pode ser editado pelo próprio usuário não limita nada. A linha nasce e morre.
+
+-- Limpeza. As consultas do app já filtram por created_at, então linha velha não
+-- atrapalha resultado — só ocupa espaço. Rode isto periodicamente (pg_cron, ou
+-- um agendamento da sua plataforma):
+--
+--   delete from public.ai_calls where created_at < now() - interval '30 days';

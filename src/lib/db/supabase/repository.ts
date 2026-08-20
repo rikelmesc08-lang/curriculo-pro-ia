@@ -47,6 +47,15 @@ interface ApplicationRow {
   updated_at: string;
 }
 
+interface AiCallRow {
+  id: string;
+  owner_id: string;
+  task: string;
+  fingerprint: string;
+  result: unknown;
+  created_at: string;
+}
+
 interface ProfileRow {
   id: string;
   email: string | null;
@@ -168,8 +177,58 @@ export function createSupabaseRepository(client: SupabaseClient): Repository {
       if (resumes.error) fail('deleteUserData/resumes', resumes.error.message);
       const applications = await client.from('applications').delete().eq('owner_id', id);
       if (applications.error) fail('deleteUserData/applications', applications.error.message);
+      // O cache guarda texto derivado do currículo da pessoa. "Apagar minha
+      // conta" precisa levar isto junto, senão a exclusão é parcial e a
+      // promessa da tela de configurações vira mentira.
+      const aiCalls = await client.from('ai_calls').delete().eq('owner_id', id);
+      if (aiCalls.error) fail('deleteUserData/aiCalls', aiCalls.error.message);
       const profile = await client.from('profiles').delete().eq('id', id);
       if (profile.error) fail('deleteUserData/profile', profile.error.message);
+    },
+
+    async countAiCalls(ownerId, since) {
+      // `head: true` com `count: 'exact'`: o Postgres conta no servidor e não
+      // devolve linha nenhuma. Trazer as linhas só para medir `.length` traria
+      // junto todo o JSON das respostas guardadas.
+      const { count, error } = await client
+        .from('ai_calls')
+        .select('id', { count: 'exact', head: true })
+        .eq('owner_id', ownerId)
+        .gte('created_at', since);
+      if (error) fail('countAiCalls', error.message);
+      return count ?? 0;
+    },
+
+    async findAiCall(ownerId, fingerprint, since) {
+      const { data, error } = await client
+        .from('ai_calls')
+        .select('*')
+        .eq('owner_id', ownerId)
+        .eq('fingerprint', fingerprint)
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle<AiCallRow>();
+      if (error) fail('findAiCall', error.message);
+      if (!data) return null;
+      return {
+        id: data.id,
+        ownerId: data.owner_id,
+        task: data.task,
+        fingerprint: data.fingerprint,
+        result: data.result,
+        createdAt: data.created_at,
+      };
+    },
+
+    async recordAiCall(ownerId, entry) {
+      const { error } = await client.from('ai_calls').insert({
+        owner_id: ownerId,
+        task: entry.task,
+        fingerprint: entry.fingerprint,
+        result: entry.result,
+      });
+      if (error) fail('recordAiCall', error.message);
     },
 
     async listResumes(ownerId) {
