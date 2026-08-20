@@ -57,7 +57,16 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
     const { data, error } = await client.auth.signUp({
       email: normalizeEmail(email),
       password,
-      options: { data: { name } },
+      options: {
+        data: { name },
+        // SEM ISTO O CADASTRO QUEBRA EM PRODUÇÃO. O Supabase precisa saber para
+        // onde mandar quem clica no link de confirmação; quando não recebe
+        // `emailRedirectTo`, ele usa o campo "Site URL" do painel — que nasce
+        // como `http://localhost:3000` e mandava todo mundo para a própria
+        // máquina. O destino do app tem que sair do app, não de uma
+        // configuração distante que ninguém revisa.
+        emailRedirectTo: `${env.siteUrl()}/auth/confirmar`,
+      },
     });
 
     if (error) {
