@@ -1,1 +1,189 @@
 @import "tailwindcss";
+
+/*
+ * Sistema visual do CurrículoPro IA.
+ *
+ * Direção: startup profissional de carreira. Fundo claro, muito branco, texto
+ * cinza-escuro, azul como única cor de marca. Sem gradiente decorativo, sem
+ * neon, sem sombra pesada. A cor forte é reservada para o que o usuário deve
+ * clicar — se tudo é azul, nada é.
+ */
+@theme {
+  /* Azul da marca — o 600 é o botão primário; o 700, o hover. */
+  --color-brand-50: #eff5ff;
+  --color-brand-100: #dbe8fe;
+  --color-brand-200: #bfd7fe;
+  --color-brand-300: #93bbfd;
+  --color-brand-400: #6096fa;
+  --color-brand-500: #3b76f6;
+  --color-brand-600: #2559eb;
+  --color-brand-700: #1d45d8;
+  --color-brand-800: #1e3aaf;
+  --color-brand-900: #1e358a;
+
+  /* Neutros. `ink` é o texto principal; `muted`, o secundário. */
+  --color-canvas: #f6f8fb;
+  --color-surface: #ffffff;
+  --color-ink: #111827;
+  --color-ink-soft: #374151;
+  --color-muted: #6b7280;
+  --color-line: #e5e7eb;
+  --color-line-strong: #d1d5db;
+
+  /* Estados. Usados em badge, alerta e pontuação — nunca como decoração. */
+  --color-success: #087443;
+  --color-success-soft: #e7f6ee;
+  --color-warning: #92610a;
+  --color-warning-soft: #fdf4e3;
+  --color-danger: #b42318;
+  --color-danger-soft: #fdeceb;
+  --color-info: #1d45d8;
+  --color-info-soft: #eff5ff;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-serif: ui-serif, Georgia, "Times New Roman", serif;
+
+  --radius-card: 0.875rem;
+
+  --shadow-card: 0 1px 2px rgb(17 24 39 / 0.04), 0 1px 3px rgb(17 24 39 / 0.06);
+  --shadow-lift: 0 4px 12px rgb(17 24 39 / 0.06), 0 12px 32px rgb(17 24 39 / 0.08);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Foco visível e consistente: acessibilidade não é opcional num formulário longo. */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  h1, h2, h3, h4 {
+    text-wrap: balance;
+    letter-spacing: -0.02em;
+  }
+
+  /* Impede que um texto colado sem espaço estoure o layout no celular. */
+  p, li, td {
+    overflow-wrap: break-word;
+  }
+}
+
+@layer utilities {
+  /* Faixa de largura usada em todas as páginas — evita `max-w-*` divergente. */
+  .container-page {
+    width: 100%;
+    max-width: 72rem;
+    margin-inline: auto;
+    padding-inline: 1rem;
+  }
+
+  @media (min-width: 768px) {
+    .container-page {
+      padding-inline: 2rem;
+    }
+  }
+
+  .container-narrow {
+    width: 100%;
+    max-width: 46rem;
+    margin-inline: auto;
+    padding-inline: 1rem;
+  }
+
+  /*
+   * Tipografia das páginas legais.
+   *
+   * Escrita à mão em vez de instalar o plugin de tipografia do Tailwind: são
+   * duas páginas de texto corrido, e o plugin traria um conjunto de estilos
+   * grande para resolver seis seletores.
+   */
+  .prose-legal h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--color-ink);
+    margin-bottom: 0.5rem;
+  }
+
+  .prose-legal h2 {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--color-ink);
+    margin-top: 2rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .prose-legal p,
+  .prose-legal li {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: var(--color-ink-soft);
+  }
+
+  .prose-legal p {
+    margin-bottom: 0.875rem;
+  }
+
+  .prose-legal ul {
+    list-style: disc;
+    padding-left: 1.25rem;
+    margin-bottom: 0.875rem;
+  }
+
+  .prose-legal li {
+    margin-bottom: 0.375rem;
+  }
+
+  .prose-legal strong {
+    color: var(--color-ink);
+    font-weight: 600;
+  }
+
+  .prose-legal a {
+    color: var(--color-brand-700);
+    text-decoration: underline;
+  }
+
+  .prose-legal code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85em;
+    background: var(--color-canvas);
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+  }
+}
+
+/*
+ * Impressão: só o currículo em pré-visualização vai para o papel. O botão
+ * "Baixar PDF" usa o gerador do servidor; isto aqui é o caminho de escape
+ * para quem prefere o diálogo de impressão do navegador.
+ */
+@media print {
+  body {
+    background: #fff;
+  }
+
+  [data-print="hide"] {
+    display: none !important;
+  }
+
+  [data-print="sheet"] {
+    box-shadow: none !important;
+    border: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: none !important;
+  }
+}

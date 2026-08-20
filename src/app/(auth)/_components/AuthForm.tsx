@@ -1,0 +1,121 @@
+'use client';
+
+import { useActionState } from 'react';
+import Link from 'next/link';
+import { signInAction, signUpAction } from '@/lib/auth/actions';
+import { idleFormState } from '@/lib/forms/state';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Alert } from '@/components/ui/Feedback';
+import { TextField } from '@/components/ui/Field';
+
+/**
+ * Formulário de entrada e de cadastro.
+ *
+ * Um componente para os dois porque a diferença é um campo e dois rótulos —
+ * duplicar traria o risco clássico de corrigir a validação num arquivo e
+ * esquecer o outro.
+ *
+ * `useActionState` mantém o formulário funcionando mesmo antes de o JavaScript
+ * carregar: o `<form action={...}>` faz POST normal, e o estado de erro chega
+ * na resposta. Numa tela de login, isso é a diferença entre a pessoa entrar ou
+ * ficar olhando um botão morto com internet ruim.
+ */
+export function AuthForm({ mode, next }: { mode: 'entrar' | 'cadastrar'; next?: string }) {
+  const isSignUp = mode === 'cadastrar';
+  const [state, formAction, pending] = useActionState(
+    isSignUp ? signUpAction : signInAction,
+    idleFormState
+  );
+
+  return (
+    <Card className="p-6 sm:p-8">
+      <h1 className="text-xl font-bold text-ink">
+        {isSignUp ? 'Criar sua conta' : 'Entrar na sua conta'}
+      </h1>
+      <p className="mt-1.5 text-sm text-muted">
+        {isSignUp
+          ? 'Leva menos de um minuto. Nenhum cartão é pedido.'
+          : 'Continue de onde você parou.'}
+      </p>
+
+      {state.status === 'error' && state.message && (
+        <Alert tone="danger" className="mt-5">
+          {state.message}
+        </Alert>
+      )}
+      {state.status === 'success' && state.message && (
+        <Alert tone="success" className="mt-5">
+          {state.message}
+        </Alert>
+      )}
+
+      <form action={formAction} className="mt-6 space-y-4" noValidate>
+        {next && <input type="hidden" name="proximo" value={next} />}
+
+        {isSignUp && (
+          <TextField
+            label="Nome completo"
+            name="name"
+            type="text"
+            autoComplete="name"
+            required
+            error={state.fieldErrors?.name}
+            placeholder="Como você assina profissionalmente"
+          />
+        )}
+
+        <TextField
+          label="E-mail"
+          name="email"
+          type="email"
+          autoComplete="email"
+          inputMode="email"
+          required
+          error={state.fieldErrors?.email}
+          placeholder="voce@email.com"
+        />
+
+        <TextField
+          label="Senha"
+          name="password"
+          type="password"
+          autoComplete={isSignUp ? 'new-password' : 'current-password'}
+          required
+          error={state.fieldErrors?.password}
+          hint={isSignUp ? 'Pelo menos 8 caracteres.' : undefined}
+        />
+
+        <Button type="submit" block size="lg" loading={pending} loadingLabel={isSignUp ? 'Criando conta...' : 'Entrando...'}>
+          {isSignUp ? 'Criar conta' : 'Entrar'}
+        </Button>
+      </form>
+
+      <p className="mt-6 text-center text-sm text-muted">
+        {isSignUp ? (
+          <>
+            Já tem conta?{' '}
+            <Link href="/login" className="font-semibold text-brand-700 hover:underline">
+              Entrar
+            </Link>
+          </>
+        ) : (
+          <>
+            Ainda não tem conta?{' '}
+            <Link href="/cadastro" className="font-semibold text-brand-700 hover:underline">
+              Criar conta
+            </Link>
+          </>
+        )}
+      </p>
+
+      {isSignUp && (
+        <p className="mt-4 text-center text-xs leading-relaxed text-muted">
+          Ao criar a conta você concorda com os{' '}
+          <Link href="/termos" className="underline hover:text-brand-700">termos de uso</Link> e com a{' '}
+          <Link href="/privacidade" className="underline hover:text-brand-700">política de privacidade</Link>.
+        </p>
+      )}
+    </Card>
+  );
+}

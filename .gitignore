@@ -30,8 +30,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files: os segredos ficam de fora, mas o exemplo PRECISA ser versionado
+# -- e o padrao `.env*` do create-next-app engolia ele em silencio.
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +41,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# banco do driver local (contem dados reais de quem testa)
+/.data
+
+# log do servidor de desenvolvimento
+dev.log
