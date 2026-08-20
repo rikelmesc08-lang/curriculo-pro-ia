@@ -8,8 +8,17 @@ import { createSupabaseServerClient } from '@/lib/db/supabase/client';
 import { env } from '@/lib/env';
 import { formError, formSuccess, text, type FormState } from '@/lib/forms/state';
 import { authenticateLocalUser, changeLocalPassword, createLocalUser } from './local';
+import { consumeLocalPasswordReset, createLocalPasswordReset } from './reset';
 import { createLocalSessionValue, getSessionUser, sessionCookie } from './session';
-import { fieldErrorsFrom, normalizeEmail, passwordSchema, signInSchema, signUpSchema } from './validation';
+import { limparLimite, mensagemDeLimite, verificarLimite } from './throttle';
+import {
+  emailSchema,
+  fieldErrorsFrom,
+  normalizeEmail,
+  passwordSchema,
+  signInSchema,
+  signUpSchema,
+} from './validation';
 
 /**
  * Ações de autenticação.
@@ -27,6 +36,12 @@ function safeNext(value: string): string {
 }
 
 export async function signUpAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  // Limite por IP no cadastro: sem ele, um script cria contas em série para
+  // consumir cota de IA, poluir a base ou usar o envio de e-mail do provedor
+  // como amplificador.
+  const limiteIp = await verificarLimite('cadastroPorIp');
+  if (!limiteIp.permitido) return formError(mensagemDeLimite(limiteIp.esperarSegundos));
+
   const parsed = signUpSchema.safeParse({
     name: text(formData, 'name'),
     email: text(formData, 'email'),
@@ -91,6 +106,18 @@ export async function signInAction(_prev: FormState, formData: FormData): Promis
   const { email, password } = parsed.data;
   const next = safeNext(text(formData, 'proximo') || '/app');
 
+  // FORÇA BRUTA E CREDENTIAL STUFFING. Sem limite, esta ação é um oráculo de
+  // senha com a velocidade da rede — e listas de e-mail e senha vazadas de
+  // outros serviços são testadas em massa exatamente assim.
+  //
+  // Dois eixos porque cada um cobre um ataque: por e-mail segura a força
+  // bruta contra UMA conta; por IP segura a varredura de MUITAS contas.
+  const limiteIp = await verificarLimite('loginPorIp');
+  if (!limiteIp.permitido) return formError(mensagemDeLimite(limiteIp.esperarSegundos));
+
+  const limiteEmail = await verificarLimite('loginPorEmail', email);
+  if (!limiteEmail.permitido) return formError(mensagemDeLimite(limiteEmail.esperarSegundos));
+
   // A mensagem de erro é a mesma para e-mail inexistente e senha errada, nos
   // dois drivers. Diferenciar entregaria de graça a lista de quem tem conta.
   const invalid = 'E-mail ou senha incorretos.';
@@ -110,6 +137,11 @@ export async function signInAction(_prev: FormState, formData: FormData): Promis
     const store = await cookies();
     store.set(sessionCookie.name, session.value, sessionCookie.options(session.expiresAt));
   }
+
+  // Entrou: o contador daquele e-mail volta a zero. Sem isto, quem erra a
+  // senha quatro vezes, acerta na quinta e volta minutos depois encontraria
+  // a própria conta bloqueada por um ataque que não houve.
+  limparLimite('loginPorEmail', email);
 
   redirect(next);
 }
@@ -190,4 +222,147 @@ export async function deleteAccountAction(_prev: FormState, formData: FormData):
   const store = await cookies();
   store.delete(sessionCookie.name);
   redirect('/');
+}
+
+/**
+ * Pedido de recuperação de senha.
+ *
+ * A RESPOSTA É A MESMA EXISTINDO OU NÃO A CONTA, e isso é a decisão central
+ * desta função. "E-mail não encontrado" transforma a tela num verificador de
+ * cadastro: qualquer pessoa descobre quem tem conta aqui testando endereços.
+ * Pelo mesmo motivo o login não diferencia senha errada de e-mail inexistente.
+ *
+ * Consequência aceita de propósito: quem digita o e-mail errado recebe a mesma
+ * confirmação e fica esperando um e-mail que não vem. O texto da tela diz isso,
+ * para a pessoa saber que conferir o endereço é o próximo passo.
+ */
+export async function requestPasswordResetAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  // Limite antes de qualquer coisa: sem ele, esta tela vira uma máquina de
+  // encher a caixa de entrada de outra pessoa — o provedor envia o e-mail, e
+  // quem aparece como remetente é este produto.
+  const limiteIp = await verificarLimite('recuperacaoPorIp');
+  if (!limiteIp.permitido) return formError(mensagemDeLimite(limiteIp.esperarSegundos));
+
+  const email = text(formData, 'email');
+  const parsed = emailSchema.safeParse(email);
+
+  // A validação de FORMATO pode falar: dizer "e-mail inválido" para "joao@"
+  // não revela cadastro nenhum, e sem isso a pessoa nunca descobre o erro de
+  // digitação.
+  if (!parsed.success) {
+    return formError('Confira o e-mail digitado.', { email: parsed.error.issues[0].message });
+  }
+
+  const confirmacao =
+    'Se existir uma conta com esse e-mail, enviamos um link para redefinir a senha. O link vale por 1 hora. Confira também a caixa de spam.';
+
+  // O limite por e-mail devolve a MESMA confirmação de sempre. Responder
+  // "muitas tentativas" só para endereços cadastrados transformaria o limite
+  // num verificador de contas — exatamente o que a mensagem neutra evita.
+  const limiteEmail = await verificarLimite('recuperacaoPorEmail', parsed.data);
+  if (!limiteEmail.permitido) return formSuccess(confirmacao);
+
+  try {
+    if (env.dbDriver() === 'supabase') {
+      const client = await createSupabaseServerClient();
+      await client.auth.resetPasswordForEmail(normalizeEmail(parsed.data), {
+        redirectTo: `${env.siteUrl()}/auth/recuperar`,
+      });
+      // O retorno do Supabase é ignorado de propósito: ele também não deve
+      // diferenciar e-mail existente de inexistente na tela.
+      return formSuccess(confirmacao);
+    }
+
+    const token = await createLocalPasswordReset(parsed.data);
+    if (token) {
+      // Driver local não tem servidor de e-mail — e não deveria ter, ele existe
+      // para o projeto rodar sem configurar serviço nenhum. O link vai para o
+      // log, marcado, e o driver é bloqueado em produção de qualquer forma.
+      console.info(
+        `\n[recuperacao-de-senha] MODO DESENVOLVIMENTO — nenhum e-mail foi enviado.\n` +
+          `Abra este link para redefinir a senha de ${normalizeEmail(parsed.data)}:\n` +
+          `  ${env.siteUrl()}/nova-senha?token=${token}\n`
+      );
+    }
+    return formSuccess(confirmacao);
+  } catch (error) {
+    console.error('[requestPasswordResetAction]', error);
+    // Nem o erro pode variar com a existência da conta.
+    return formSuccess(confirmacao);
+  }
+}
+
+/**
+ * Define a nova senha.
+ *
+ * Dois caminhos que chegam aqui com credenciais diferentes:
+ *
+ *   - `supabase`: a pessoa clicou no link do e-mail, passou por
+ *     `/auth/recuperar`, e já chega com uma sessão de recuperação no cookie.
+ *     Trocar a senha é `updateUser` sobre essa sessão.
+ *   - `local`: a prova é o token na URL, verificado e queimado em
+ *     `consumeLocalPasswordReset`.
+ */
+export async function resetPasswordAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  const parsed = passwordSchema.safeParse(text(formData, 'password'));
+  if (!parsed.success) {
+    return formError('Confira a senha.', { password: parsed.error.issues[0].message });
+  }
+
+  const confirmacao = text(formData, 'confirmacao');
+  if (confirmacao !== parsed.data) {
+    return formError('As duas senhas precisam ser iguais.', {
+      confirmacao: 'A confirmação não confere com a senha.',
+    });
+  }
+
+  if (env.dbDriver() === 'supabase') {
+    const client = await createSupabaseServerClient();
+    const { data, error: sessionError } = await client.auth.getUser();
+    if (sessionError || !data.user) {
+      return formError(
+        'Este link expirou ou já foi usado. Peça um novo link de recuperação.'
+      );
+    }
+
+    const { error } = await client.auth.updateUser({ password: parsed.data });
+    if (error) {
+      console.error('[resetPasswordAction/supabase]', error);
+      return formError('Não conseguimos trocar sua senha agora. Tente de novo em instantes.');
+    }
+
+    // ENCERRA A SESSÃO DE RECUPERAÇÃO, pelos mesmos dois motivos do driver
+    // local: o link do e-mail não pode valer como acesso permanente ao
+    // painel, e passar pelo login uma vez confirma que a senha nova é a que
+    // a pessoa acha que é.
+    //
+    // Sem isto havia ainda um segundo defeito, visível: o redirecionamento
+    // para /login encontrava uma sessão ativa e quicava direto para /app, e
+    // a confirmação "Senha redefinida" nunca chegava a aparecer.
+    await client.auth.signOut();
+  } else {
+    const resultado = await consumeLocalPasswordReset(text(formData, 'token'), parsed.data);
+    if (!resultado.ok) {
+      const mensagens = {
+        invalido: 'Este link não é válido. Peça um novo link de recuperação.',
+        expirado: 'Este link expirou. Peça um novo link de recuperação.',
+        usado: 'Este link já foi usado. Peça um novo se precisar trocar a senha de novo.',
+      } as const;
+      return formError(mensagens[resultado.reason]);
+    }
+
+    // NÃO cria sessão automaticamente. Quem redefiniu a senha passa pelo login
+    // uma vez: é a confirmação de que a senha nova é a que a pessoa acha que é,
+    // e evita que um link vazado vire acesso direto ao painel.
+    const store = await cookies();
+    store.delete(sessionCookie.name);
+  }
+
+  redirect('/login?senha-redefinida=1');
 }
