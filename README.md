@@ -111,11 +111,28 @@ poderia ser listada, sem conteúdo, a partir de qualquer link para ela.
 
 ### Vercel
 
-Um app Next.js sobe sem configuração nenhuma; o `vercel.json` só ajusta o que a
-detecção automática não adivinha. O principal é a **região `gru1` (São Paulo)**:
-toda página aqui é renderizada no servidor, então cada visita faz ida e volta até
-a função. **Se usar Supabase, escolha a mesma região lá** — do contrário cada
-consulta atravessa o continente duas vezes.
+Um app Next.js sobe sem configuração nenhuma; o `vercel.json` só ajusta as três
+coisas que a detecção automática não adivinha:
+
+- **`regions: ["gru1"]` (São Paulo).** Toda página aqui é renderizada no
+  servidor, então cada visita faz ida e volta até a função. Em São Paulo isso
+  custa dezenas de milissegundos; na região padrão, americana, custa centenas.
+  **Se usar Supabase, escolha a mesma região lá** — do contrário cada consulta
+  atravessa o continente duas vezes.
+- **`installCommand: "npm ci"`**, que respeita o lockfile em vez de reresolver
+  versões que ninguém testou.
+- **`framework: "nextjs"`**, explícito para não depender de heurística.
+
+O tempo limite das funções **não** fica aqui: vem de `export const maxDuration =
+60` nas próprias rotas, ao lado do código que depende dele, e assim vale em
+qualquer plataforma.
+
+**Não comente o `vercel.json`.** JSON não tem comentário, e o truque comum de
+usar uma chave `"//"` **quebra o deploy**: a Vercel valida o arquivo contra um
+schema estrito e recusa qualquer propriedade de topo que não conheça, com
+`should NOT have additional property "//"`. Nada valida esse arquivo localmente
+— nem `npm run build`, nem o CI — então o erro só aparece na Vercel, e derruba o
+deploy inteiro antes de a build começar. Explicação vai aqui no README.
 
 Preencha as variáveis em Settings → Environment Variables. Nenhuma é necessária
 no build: o projeto não tem variável `NEXT_PUBLIC_*`, então nada é embutido no
