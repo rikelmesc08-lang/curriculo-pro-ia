@@ -59,8 +59,9 @@ export default async function SettingsPage() {
             {demo && (
               <Alert tone="warning" title="A IA real não está ligada">
                 Os resultados vêm de regras fixas aplicadas ao que você digitou, e aparecem sempre
-                marcados como demonstração. Configure <code className="font-mono">ANTHROPIC_API_KEY</code>{' '}
-                no arquivo <code className="font-mono">.env.local</code> para usar o modelo de verdade.
+                marcados como demonstração. Configure <code className="font-mono">GEMINI_API_KEY</code>{' '}
+                no arquivo <code className="font-mono">.env.local</code> para usar o modelo de
+                verdade — a camada gratuita do Google não pede cartão.
               </Alert>
             )}
 

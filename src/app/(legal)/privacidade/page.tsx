@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { env } from '@/lib/env';
+import { aiModeIsDemo, aiProviderLabel } from '@/services/ai';
 
 export const metadata: Metadata = {
   title: 'Política de privacidade',
@@ -16,7 +17,8 @@ export const metadata: Metadata = {
  * sistema imaginário é pior do que não ter política.
  */
 export default function PrivacyPage() {
-  const usaIaExterna = env.aiProvider() === 'anthropic';
+  const usaIaExterna = !aiModeIsDemo();
+  const provedorIa = aiProviderLabel();
   const armazenamento = env.dbDriver();
 
   return (
@@ -78,12 +80,19 @@ export default function PrivacyPage() {
           <p>
             Quando você clica em um botão de IA (melhorar resumo, analisar vaga, otimizar currículo,
             gerar carta, preparar entrevista ou escrever mensagem), o conteúdo do seu currículo e o
-            texto da vaga que você colou são enviados para a <strong>API da Anthropic</strong>, que
+            texto da vaga que você colou são enviados para a <strong>{provedorIa}</strong>, que
             processa o pedido e devolve o resultado.
           </p>
           <p>
             Esse envio só acontece no momento em que você clica. Nada é enviado em segundo plano,
             e nenhuma parte do seu currículo sai daqui enquanto você apenas digita.
+          </p>
+          <p>
+            <strong>O resultado fica guardado por um tempo.</strong> Para não pedir a mesma coisa
+            duas vezes ao provedor, guardamos a resposta de cada análise junto com um código
+            (um hash) que identifica a pergunta. O texto que você enviou não é guardado nesse
+            registro — só o resultado e o código. Ao apagar sua conta, esses registros são apagados
+            junto com todo o resto.
           </p>
         </>
       ) : (
