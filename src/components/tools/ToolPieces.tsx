@@ -74,9 +74,29 @@ export function ChipList({ items, tone = 'neutral' }: { items: string[]; tone?: 
         ? 'border-danger/20 bg-danger-soft text-danger'
         : 'border-line bg-canvas text-ink-soft';
 
+  // O modelo repete termo com alguma frequência (o mesmo "Excel" saindo em
+  // skills e em tools, por exemplo). Sem remover a repetição, duas pílulas
+  // iguais recebem a mesma chave de React — que avisa no console e pode
+  // reaproveitar o nó errado numa atualização — e a tela ainda mostra o termo
+  // duas vezes, o que parece defeito para quem lê.
+  //
+  // A comparação ignora caixa e espaço nas pontas; a primeira grafia é a que
+  // fica, porque costuma ser a que o modelo tratou como principal.
+  const vistos = new Set<string>();
+  const unicos = items.filter((item) => {
+    const chave = item.trim().toLowerCase();
+    if (!chave || vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
+  });
+
+  if (unicos.length === 0) {
+    return <p className="text-sm text-muted">Nada identificado.</p>;
+  }
+
   return (
     <ul className="flex flex-wrap gap-2">
-      {items.map((item) => (
+      {unicos.map((item) => (
         <li key={item} className={`rounded-full border px-3 py-1 text-sm ${classes}`}>
           {item}
         </li>

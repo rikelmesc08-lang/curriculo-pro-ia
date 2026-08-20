@@ -5,6 +5,7 @@ import { requireUser } from '@/lib/auth/session';
 import { getRepository } from '@/lib/db';
 import { fail, ok, type ActionResult } from '@/lib/forms/action-result';
 import { parseResumeContent } from '@/lib/resume/schema';
+import { preserveAchievements } from '@/services/ai/integrity';
 
 /**
  * Ações do currículo.
@@ -65,9 +66,14 @@ export async function saveResumeAction(
  *   - `skillsOrder` só REORDENA. Nome que não está entre as competências
  *     cadastradas é ignorado, então a IA não consegue acrescentar uma
  *     habilidade que a pessoa nunca declarou;
- *   - formação, certificações, idiomas e dados pessoais não são tocados.
+ *   - formação, certificações, idiomas e dados pessoais não são tocados;
+ *   - resultados nunca DIMINUEM. Se a proposta traz menos itens em
+ *     `achievements` do que a experiência já tinha, os originais são mantidos
+ *     inteiros. Ver `services/ai/integrity.ts`.
  *
- * Se o prompt falhar em segurar o modelo, esta função ainda segura.
+ * Se o prompt falhar em segurar o modelo, esta função ainda segura. E o payload
+ * chega do CLIENTE: mesmo que a camada de serviço já tenha corrigido a saída da
+ * IA, quem grava no banco é aqui, e aqui a checagem se repete.
  */
 export async function applyOptimizationAction(
   resumeId: string,
@@ -83,7 +89,13 @@ export async function applyOptimizationAction(
   const current = await repository.getResume(user.id, resumeId);
   if (!current) return fail('Currículo não encontrado.');
 
-  const byId = new Map((optimization.experiences ?? []).map((item) => [item.id, item]));
+  // A trava roda ANTES da mesclagem: o que não passar por ela nem chega a ser
+  // considerado como proposta para aquela experiência.
+  const { experiences: propostas } = preserveAchievements(
+    current.experiences,
+    optimization.experiences ?? []
+  );
+  const byId = new Map(propostas.map((item) => [item.id, item]));
 
   const experiences = current.experiences.map((experience) => {
     const proposal = byId.get(experience.id);

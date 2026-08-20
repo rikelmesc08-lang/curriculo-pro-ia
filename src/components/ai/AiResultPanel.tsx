@@ -5,7 +5,7 @@ import type { AiMode } from '@/types/ai';
 import { Alert } from '@/components/ui/Feedback';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Spinner';
-import { AiModeBadge } from './AiNotices';
+import { AiModeBadge, CachedBadge } from './AiNotices';
 
 /**
  * Casca de todo resultado de IA: carregando, erro, vazio e conteúdo.
@@ -19,6 +19,7 @@ export function AiResultPanel({
   error,
   mode,
   notice,
+  cached,
   hasResult,
   onRetry,
   pendingMessage,
@@ -29,6 +30,8 @@ export function AiResultPanel({
   error: string | null;
   mode?: AiMode;
   notice?: string;
+  /** Resultado reaproveitado de uma chamada anterior idêntica. */
+  cached?: boolean;
   hasResult: boolean;
   onRetry?: () => void;
   pendingMessage: string;
@@ -80,6 +83,7 @@ export function AiResultPanel({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         {mode && <AiModeBadge mode={mode} />}
+        {cached && <CachedBadge />}
       </div>
       {notice && <Alert tone="warning">{notice}</Alert>}
       {children}

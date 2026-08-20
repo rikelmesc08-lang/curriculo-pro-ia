@@ -1,7 +1,15 @@
 import { clamp, normalizeForCompare } from '@/lib/utils';
-import type { AtsAnalysis, AtsCriterion } from '@/types/ai';
+import type {
+  AtsAnalysis,
+  AtsCriterion,
+  ResumeReview,
+  ReviewDimension,
+  ReviewDimensionId,
+  ReviewIssue,
+} from '@/types/ai';
 import type { Resume } from '@/types/resume';
 import { coveredTerms, extractKeywords } from './keywords';
+import { polishParagraph, toBullets } from './text-polish';
 
 /**
  * Medições sobre o currículo que NÃO precisam de IA.
@@ -222,4 +230,167 @@ export function orderSkillsByJob(resume: Resume, jobDescription: string): string
     .map((skill) => ({ skill, hit: job.includes(normalizeForCompare(skill.name)) }))
     .sort((a, b) => Number(b.hit) - Number(a.hit))
     .map((entry) => entry.skill.name);
+}
+
+// ---------------------------------------------------------------------------
+// Análise completa — versão medida, sem IA
+// ---------------------------------------------------------------------------
+
+/**
+ * O que fazer quando cada dimensão está baixa.
+ *
+ * É texto de produto, escrito uma vez e reaproveitado — não é o modelo
+ * "sugerindo" algo. Nenhuma destas frases manda a pessoa inventar, exagerar ou
+ * afirmar o que não é verdade; a de palavras-chave diz o contrário, explícito.
+ */
+const FIXES: Record<ReviewDimensionId, string> = {
+  clareza:
+    'Quebre os períodos longos em frases de uma linha. Um recrutador lê o currículo em poucos segundos e não volta atrás.',
+  organizacao:
+    'Preencha os dados de contato e mantenha a ordem esperada: contato, resumo, experiência, formação, competências.',
+  erros:
+    'Complete os campos que ficaram vazios. Campo em branco num currículo é lido como descuido, mesmo quando não é.',
+  resumo:
+    'Escreva de 4 a 6 linhas dizendo sua área, o que você já fez e o que busca. É a primeira coisa que se lê.',
+  experiencias:
+    'Descreva o que você fazia em cada experiência, começando por verbo de ação. Cargo e empresa sozinhos não dizem nada.',
+  habilidades:
+    'Cadastre as competências que você realmente usa no dia a dia, separando as técnicas das comportamentais.',
+  'palavras-chave':
+    'Use no seu texto os mesmos termos que a vaga usa — mas só onde for verdade. Escrever o que você não faz não passa na entrevista.',
+  ats: 'Resolva primeiro os pontos acima que estiverem em vermelho. Eles puxam a nota geral para baixo.',
+};
+
+/** Campos essenciais em branco. É o mais perto de "erro" que dá para medir sem IA. */
+function emptyEssentials(resume: Resume): string[] {
+  const missing: string[] = [];
+  if (!resume.personal.fullName.trim()) missing.push('nome');
+  if (!resume.personal.email.trim()) missing.push('e-mail');
+  if (!resume.personal.phone.trim()) missing.push('telefone');
+  if (!resume.personal.city.trim()) missing.push('cidade');
+  if (!resume.goal.targetRole.trim()) missing.push('cargo desejado');
+  if (resume.experiences.some((experience) => !experience.role.trim())) {
+    missing.push('cargo em alguma experiência');
+  }
+  if (resume.experiences.some((experience) => !experience.company.trim())) {
+    missing.push('empresa em alguma experiência');
+  }
+  return missing;
+}
+
+/**
+ * A nota que o currículo alcançaria depois de aplicadas as correções.
+ *
+ * NÃO É CHUTE E NÃO É PROMESSA: é o recálculo da mesma média com toda dimensão
+ * abaixo de POTENTIAL_FLOOR elevada a POTENTIAL_TARGET. Uma conta declarada e
+ * reproduzível, que dá o mesmo número toda vez para a mesma entrada. Inventar
+ * um "potencial de 92%" para impressionar seria exatamente o tipo de número que
+ * este produto não produz.
+ */
+const POTENTIAL_FLOOR = 70;
+const POTENTIAL_TARGET = 85;
+
+export function potentialFrom(scores: number[]): number {
+  if (scores.length === 0) return 0;
+  const raised = scores.map((score) => (score < POTENTIAL_FLOOR ? POTENTIAL_TARGET : score));
+  const average = raised.reduce((total, score) => total + score, 0) / raised.length;
+  const current = scores.reduce((total, score) => total + score, 0) / scores.length;
+  // Nunca abaixo da nota atual: "potencial" que piora não é potencial.
+  return Math.round(Math.max(average, current));
+}
+
+/**
+ * Análise completa medida, sem IA.
+ *
+ * É o que o modo demonstração devolve — e, por ser medição de verdade, continua
+ * útil sem chave de API nenhuma configurada. Também alimenta o prompt da versão
+ * com IA, o que impede o modelo de chutar cobertura de palavra-chave.
+ */
+export function heuristicReview(resume: Resume, jobDescription: string): ResumeReview {
+  const measured = heuristicAts(resume, jobDescription);
+  const coverage = keywordCoverage(resume, jobDescription);
+  const byId = new Map(measured.criteria.map((criterion) => [criterion.id, criterion]));
+  const scoreOf = (id: AtsCriterion['id']) => byId.get(id)?.score ?? 0;
+  const commentOf = (id: AtsCriterion['id']) => byId.get(id)?.comment ?? '';
+
+  const missingFields = emptyEssentials(resume);
+  const hasJob = jobDescription.trim().length > 0;
+
+  const dimensions: ReviewDimension[] = [
+    { id: 'clareza', label: 'Clareza', score: scoreOf('legibilidade'), comment: commentOf('legibilidade') },
+    { id: 'organizacao', label: 'Organização', score: scoreOf('estrutura'), comment: commentOf('estrutura') },
+    {
+      id: 'erros',
+      label: 'Erros e campos vazios',
+      score: clamp(100 - missingFields.length * 15, 0, 100),
+      comment:
+        missingFields.length === 0
+          ? 'Nenhum campo essencial em branco.'
+          : `Campos essenciais em branco: ${missingFields.join(', ')}.`,
+    },
+    { id: 'resumo', label: 'Resumo profissional', score: scoreOf('clareza'), comment: commentOf('clareza') },
+    { id: 'experiencias', label: 'Experiências', score: scoreOf('experiencia'), comment: commentOf('experiencia') },
+    { id: 'habilidades', label: 'Habilidades', score: scoreOf('competencias'), comment: commentOf('competencias') },
+    {
+      id: 'palavras-chave',
+      label: 'Palavras-chave',
+      score: scoreOf('palavras-chave'),
+      comment: commentOf('palavras-chave'),
+    },
+    {
+      id: 'ats',
+      label: 'Compatibilidade ATS',
+      score: measured.score,
+      comment: hasJob
+        ? `Estimativa geral considerando a vaga informada (${coverage.covered.length} de ${coverage.terms.length} termos presentes).`
+        : 'Estimativa geral. Cole uma vaga para medir também a aderência a ela.',
+    },
+  ];
+
+  const scores = dimensions.map((dimension) => dimension.score);
+  const score = Math.round(scores.reduce((total, item) => total + item, 0) / scores.length);
+
+  const issues: ReviewIssue[] = dimensions
+    .filter((dimension) => dimension.score < 70)
+    .sort((a, b) => a.score - b.score)
+    .map((dimension) => ({
+      where: dimension.label,
+      problem: dimension.comment,
+      fix: FIXES[dimension.id],
+      severity: dimension.score < 40 ? 'alta' : dimension.score < 60 ? 'media' : 'baixa',
+    }));
+
+  return {
+    score,
+    potentialScore: potentialFrom(scores),
+    dimensions,
+    strengths: dimensions.filter((dimension) => dimension.score >= 75).map((dimension) => dimension.comment),
+    weaknesses: dimensions.filter((dimension) => dimension.score < 60).map((dimension) => dimension.comment),
+    opportunities:
+      coverage.missing.length > 0
+        ? [
+            `A vaga cita termos que não aparecem no seu currículo: ${coverage.missing.slice(0, 8).join(', ')}. Inclua apenas os que você realmente domina.`,
+          ]
+        : [],
+    issues,
+    recommendations: measured.recommendations,
+    keywords: { present: coverage.covered, missing: coverage.missing },
+    optimized: {
+      summary: polishParagraph(resume.goal.summary).text,
+      experiences: resume.experiences.map((experience) => ({
+        id: experience.id,
+        description: polishParagraph(experience.description).text,
+        responsibilities:
+          experience.responsibilities.length > 0
+            ? experience.responsibilities.map((item) => polishParagraph(item).text)
+            : toBullets(experience.description),
+        // Resultados são copiados, nunca gerados.
+        achievements: experience.achievements.map((item) => polishParagraph(item).text),
+      })),
+      skillsOrder: orderSkillsByJob(resume, jobDescription),
+      notes: [
+        'Modo demonstração: os textos foram apenas formatados e as competências reordenadas. Nenhuma reescrita real foi feita.',
+      ],
+    },
+  };
 }

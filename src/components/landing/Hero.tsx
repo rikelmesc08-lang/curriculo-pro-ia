@@ -52,7 +52,10 @@ export function Hero({ isAuthenticated }: { isAuthenticated: boolean }) {
               Criar meu currículo
             </ButtonLink>
             <ButtonLink
-              href={isAuthenticated ? '/app/analisar-vaga' : '/cadastro?destino=analisar'}
+              // /app/analise e não /app/analisar-vaga: o botão diz "analisar meu
+              // currículo", e analisar-vaga é outra ferramenta — aquela lê o anúncio
+              // da empresa. Quem clica aqui quer o diagnóstico do próprio currículo.
+              href={isAuthenticated ? '/app/analise' : '/cadastro?destino=analisar'}
               size="lg"
               variant="secondary"
               className="uppercase tracking-wide"

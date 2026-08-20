@@ -10,13 +10,21 @@ import type {
   OptimizedResume,
   RecruiterMessage,
   RecruiterMessageKind,
+  ResumeReview,
   RewrittenExperience,
   RewrittenText,
 } from '@/types/ai';
 import type { Resume } from '@/types/resume';
 import { firstName, periodLabel } from '@/lib/utils';
 import { runAiTask } from './index';
-import { heuristicAts, keywordCoverage, orderSkillsByJob, resumeSearchText } from './heuristics';
+import { preserveAchievements, restoredNote } from './integrity';
+import {
+  heuristicAts,
+  heuristicReview,
+  keywordCoverage,
+  orderSkillsByJob,
+  resumeSearchText,
+} from './heuristics';
 import { extractKeywords, extractTools, guessRole } from './keywords';
 import { resumeToText, systemPrompt, trimForPrompt } from './prompts';
 import {
@@ -27,6 +35,7 @@ import {
   jobMatchSchema,
   optimizedResumeSchema,
   recruiterMessageSchema,
+  resumeReviewSchema,
   rewrittenExperienceSchema,
   rewrittenTextSchema,
 } from './schemas';
@@ -305,7 +314,7 @@ export async function optimizeResume(input: {
   const job = trimForPrompt(input.jobDescription, MAX_JOB_CHARS);
   const coverage = keywordCoverage(resume, job);
 
-  return runAiTask<OptimizedResume>({
+  const envelope = await runAiTask<OptimizedResume>({
     name: 'optimizeResume',
     maxTokens: 4000,
     schema: optimizedResumeSchema,
@@ -321,6 +330,7 @@ export async function optimizeResume(input: {
       'PROIBIÇÕES QUE VALEM AQUI EM ESPECIAL:',
       '- não crie experiência, empresa, período, curso, certificação, idioma ou competência;',
       '- não crie número, percentual nem resultado. "achievements" só repete o que a pessoa informou;',
+      '- não APAGUE resultado: devolva um item em "achievements" para CADA resultado recebido, reescrito se quiser, mas nunca condensando dois em um nem omitindo algum;',
       '- não mude cargo, empresa nem datas para se parecerem mais com a vaga.',
       '',
       `Termos da vaga ausentes do currículo hoje: ${coverage.missing.join(', ') || '(nenhum)'}. Só use algum deles se o texto da pessoa já mostrar aquilo com outro nome — e diga isso em "notes".`,
@@ -352,6 +362,34 @@ export async function optimizeResume(input: {
       ],
     }),
   });
+
+  return withPreservedAchievements(envelope, resume);
+}
+
+/**
+ * Aplica a trava contra perda de resultado sobre um envelope já pronto.
+ *
+ * Fica DEPOIS do `runAiTask` e antes do retorno, de modo que todo consumidor —
+ * pré-visualização, aplicação no currículo, PDF e o cache — enxergue o mesmo
+ * dado corrigido. Corrigir só na hora de aplicar deixaria a tela mostrando uma
+ * proposta diferente da que seria gravada.
+ */
+function withPreservedAchievements<
+  T extends { experiences: { id: string; achievements: string[] }[]; notes: string[] },
+>(envelope: AiEnvelope<T>, resume: Resume): AiEnvelope<T> {
+  const { experiences, restored } = preserveAchievements(resume.experiences, envelope.data.experiences);
+  if (restored === 0) return envelope;
+
+  return {
+    ...envelope,
+    data: {
+      ...envelope.data,
+      experiences,
+      // O aviso não é opcional: a pessoa precisa saber por que aquele trecho
+      // veio sem reescrita, senão parece que a ferramenta falhou.
+      notes: [...envelope.data.notes, restoredNote(restored)],
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -597,3 +635,98 @@ export function greetingName(resume: Resume | null, fallback: string): string {
 
 /** Reexporta para as Server Actions medirem sem reimplementar. */
 export { keywordCoverage, resumeSearchText };
+
+// ---------------------------------------------------------------------------
+// 10. Análise completa do currículo
+// ---------------------------------------------------------------------------
+
+/**
+ * A análise completa: diagnóstico, nota, recomendações e versão otimizada, tudo
+ * numa chamada só.
+ *
+ * POR QUE UMA CHAMADA E NÃO CINCO: as ferramentas separadas (vaga, match, ATS,
+ * otimizar) continuam existindo e são melhores quando a pessoa quer só uma
+ * delas. Esta aqui é o caminho de entrada — e fazer cinco chamadas para montar
+ * uma tela custaria cinco vezes a cota gratuita para responder uma pergunta só:
+ * "como está meu currículo?". O modelo já lê o currículo inteiro de qualquer
+ * forma; pedir tudo de uma vez é o mesmo texto de entrada com uma saída maior.
+ *
+ * A medição sem IA vai junto no prompt. Não é enfeite: é o que impede o modelo
+ * de chutar cobertura de palavra-chave, e é exatamente o que o modo
+ * demonstração devolve.
+ */
+export async function reviewResume(input: {
+  resume: Resume;
+  jobDescription?: string;
+}): Promise<AiEnvelope<ResumeReview>> {
+  const { resume } = input;
+  const job = trimForPrompt(input.jobDescription ?? '', MAX_JOB_CHARS);
+  const measured = heuristicReview(resume, job);
+  const hasJob = job.trim().length > 0;
+
+  const envelope = await runAiTask<ResumeReview>({
+    name: 'reviewResume',
+    maxTokens: 4000,
+    schema: resumeReviewSchema,
+    system: systemPrompt(
+      'Você atua como recrutador sênior, especialista em RH e conhecedor de sistemas ATS. Sua tarefa é auditar um currículo com honestidade e devolver, junto do diagnóstico, uma versão reescrita dele.'
+    ),
+    prompt: [
+      'Analise o currículo abaixo e devolva um único objeto JSON com estes campos:',
+      '',
+      '- score: 0 a 100, o currículo COMO ESTÁ HOJE. Seja realista; nota alta para currículo fraco não ajuda ninguém.',
+      '- potentialScore: 0 a 100, o mesmo currículo depois de aplicadas as correções que você apontar. Nunca menor que score.',
+      '- dimensions: uma entrada para CADA um destes oito ids, com label, score de 0 a 100 e comment:',
+      '    clareza, organizacao, erros, resumo, experiencias, habilidades, palavras-chave, ats',
+      '- strengths: o que já está bom',
+      '- weaknesses: o que está fraco',
+      '- opportunities: o que dá para melhorar e ainda não foi tentado',
+      '- issues: problemas concretos. Para cada um: where (onde está, em linguagem de usuário), problem (o que está errado), fix (o que fazer) e severity (alta, media ou baixa). Ordene do mais grave para o menos grave.',
+      '- recommendations: recomendações específicas e acionáveis, na ordem em que devem ser feitas',
+      '- keywords: { present: termos relevantes que já aparecem, missing: termos relevantes ausentes }',
+      '- optimized: a versão profissional reescrita, com:',
+      '    summary: resumo profissional reescrito',
+      '    experiences: para CADA experiência recebida, o MESMO id e os textos reescritos (description, responsibilities, achievements)',
+      '    skillsOrder: os nomes das competências JÁ CADASTRADAS, reordenados por relevância. Não acrescente nenhuma.',
+      '    notes: o que a pessoa ainda precisa completar por conta própria',
+      '',
+      'PROIBIÇÕES QUE VALEM AQUI EM ESPECIAL:',
+      '- não crie experiência, empresa, período, curso, certificação, idioma ou competência;',
+      '- não crie número, percentual nem resultado. "achievements" só repete o que a pessoa informou;',
+      '- não APAGUE resultado: devolva um item em "achievements" para CADA resultado recebido, reescrito se quiser, mas nunca condensando dois em um nem omitindo algum;',
+      '- não mude cargo, empresa nem datas;',
+      '- em "fix" e em "recommendations", nunca mande a pessoa afirmar o que ela não faz. Mandar estudar, fazer curso ou destacar algo equivalente que ela realmente tenha é o certo.',
+      '',
+      'Medição automática já feita por contagem de texto. Use como ponto de partida, discorde só com motivo claro, e nunca invente cobertura de palavra-chave:',
+      JSON.stringify(
+        {
+          score: measured.score,
+          dimensions: measured.dimensions.map((dimension) => ({
+            id: dimension.id,
+            score: dimension.score,
+          })),
+          keywords: measured.keywords,
+        },
+        null,
+        2
+      ),
+      '',
+      '=== CURRÍCULO ===',
+      resumeToText(resume),
+      hasJob
+        ? '\n=== VAGA DE REFERÊNCIA (para escolher o que destacar, nunca para inventar fato) ===\n' + job
+        : '\n(Nenhuma vaga informada: avalie o currículo para a área e o cargo que a própria pessoa declarou, e diga em "opportunities" que colar uma vaga deixa a análise mais precisa.)',
+    ].join('\n'),
+    // No modo demonstração o resultado é a própria medição — que é real,
+    // reproduzível e não depende de modelo nenhum.
+    demo: () => measured,
+  });
+
+  // `optimized` tem a forma que a trava espera; o resto da análise não é tocado.
+  const otimizado = withPreservedAchievements(
+    { ...envelope, data: envelope.data.optimized },
+    resume
+  );
+
+  return { ...envelope, data: { ...envelope.data, optimized: otimizado.data } };
+}
