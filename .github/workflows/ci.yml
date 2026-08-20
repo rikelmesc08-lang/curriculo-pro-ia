@@ -33,10 +33,10 @@ jobs:
 
     steps:
       - name: Baixar o código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Preparar o Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           # Lê o .nvmrc: uma fonte só para a versão do Node, aqui e na máquina
           # de quem desenvolve.
@@ -53,6 +53,21 @@ jobs:
       # custar o build inteiro para ser descoberto.
       - name: ESLint
         run: npm run lint
+
+      # PASSO OBRIGATÓRIO ANTES DO tsc, e a falta dele derrubou a primeira
+      # execução deste workflow.
+      #
+      # `PageProps` e `LayoutProps` são tipos GLOBAIS que o Next gera em
+      # `.next/types/` a partir das rotas do projeto. Num clone limpo esse
+      # diretório não existe, e as oito páginas que usam esses tipos falham com
+      # "Cannot find name". Na máquina de quem desenvolve o problema não
+      # aparece — o `.next` já está lá de algum `npm run dev` anterior, e por
+      # isso o erro só existe no CI.
+      #
+      # `typegen` gera só as definições, sem compilar a aplicação: custa
+      # segundos, contra o build inteiro.
+      - name: Gerar tipos de rota
+        run: npx next typegen
 
       - name: Verificação de tipos
         run: npx tsc --noEmit
