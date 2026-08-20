@@ -206,3 +206,43 @@ create policy "ia: apagar as proprias" on public.ai_calls
 -- um agendamento da sua plataforma):
 --
 --   delete from public.ai_calls where created_at < now() - interval '30 days';
+
+
+-- Permissões de tabela ------------------------------------------------------
+--
+-- ISTO NÃO É REDUNDANTE COM A RLS, e a diferença derrubou o app quando faltou.
+-- São duas camadas independentes do Postgres:
+--
+--   GRANT decide se o papel PODE TOCAR na tabela;
+--   RLS  decide QUAIS LINHAS ele enxerga depois de poder tocar.
+--
+-- Sem o GRANT, a RLS nem chega a ser avaliada: toda consulta morre em
+-- "permission denied for table ...", inclusive de usuário logado. Este bloco
+-- foi acrescentado depois de o app falhar exatamente assim num projeto novo —
+-- o esquema confiava nas permissões padrão do Supabase em vez de declará-las,
+-- e elas não vieram.
+--
+-- `anon` (visitante não autenticado) NÃO RECEBE NADA. Nenhuma tela deste
+-- produto lê dado sem sessão, então o papel anônimo não precisa de acesso a
+-- tabela nenhuma. O `revoke` também tira o TRUNCATE que vinha por padrão —
+-- TRUNCATE ignora RLS, e ninguém deveria tê-lo aqui.
+--
+-- `authenticated` recebe EXATAMENTE as operações que têm política. Onde não há
+-- política, não há permissão: as duas camadas dizem a mesma coisa, e a segunda
+-- não vira uma brecha silenciosa se alguém mexer na primeira.
+
+revoke all on public.profiles     from anon;
+revoke all on public.resumes      from anon;
+revoke all on public.applications from anon;
+revoke all on public.ai_calls     from anon;
+
+-- profiles: o perfil NASCE pelo gatilho `handle_new_user`, que roda como
+-- `security definer` — por isso não há insert aqui.
+grant select, update, delete on public.profiles to authenticated;
+
+grant select, insert, update, delete on public.resumes      to authenticated;
+grant select, insert, update, delete on public.applications to authenticated;
+
+-- ai_calls: sem update, igual às políticas. Um registro de uso que o próprio
+-- usuário pode editar não limita nada.
+grant select, insert, delete on public.ai_calls to authenticated;
