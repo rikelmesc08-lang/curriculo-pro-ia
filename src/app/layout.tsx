@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
+import { env, warnMissingSiteUrl } from '@/lib/env';
 import './globals.css';
 
 /**
@@ -19,8 +20,13 @@ const SITE_NAME = 'CurrículoPro IA';
 const DESCRIPTION =
   'Crie, otimize e adapte seu currículo para vagas de emprego usando inteligência artificial.';
 
+// Lê pelo `env`, e não por `process.env` direto: era o único lugar do projeto
+// que escapava do módulo, e por isso o único que não teria como avisar quando a
+// variável faltasse.
+warnMissingSiteUrl();
+
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.SITE_URL ?? 'http://localhost:3000'),
+  metadataBase: new URL(env.siteUrl()),
   title: {
     default: `${SITE_NAME} — Crie seu Currículo Profissional com Inteligência Artificial`,
     template: `%s — ${SITE_NAME}`,
