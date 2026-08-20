@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!--
+    Favicon: o mesmo desenho de `components/layout/Logo.tsx`, com duas
+    diferenças que só importam em 16 pixels.
+
+    1. CORES LITERAIS, não classes do Tailwind. Este arquivo é servido direto
+       pelo navegador, sem passar por build de CSS — uma classe aqui viraria
+       forma preta.
+    2. TRAÇO MAIS GROSSO (2.4 em vez de 2) e desenho ocupando mais da tela. Na
+       aba do navegador o ícone é renderizado a 16px, e a espessura original
+       vira um borrão cinza.
+  -->
+  <rect x="2" y="1" width="22" height="30" rx="4.5" fill="#2559eb" />
+  <path d="M7 9h12M7 14.5h12M7 20h6" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" />
+  <circle cx="23" cy="22" r="8.5" fill="#1e358a" />
+  <path d="M19.5 22.5l2.6 2.6 4.4-5.4" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+</svg>

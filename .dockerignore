@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# O que NÃO entra na imagem.
+#
+# ESTE ARQUIVO É DE SEGURANÇA, não de tamanho. Sem ele, o `COPY . .` do
+# Dockerfile leva para dentro da imagem:
+#
+#   - `.env.local`, com a chave da API e o segredo de sessão;
+#   - `.data/db.json`, com nome, telefone, e-mail e currículo de quem testou;
+#   - o `.git` inteiro, com todo o histórico.
+#
+# Camada de imagem é pública para quem tiver a imagem. Um segredo copiado para
+# dentro dela continua lá mesmo que uma camada posterior o apague.
+# ---------------------------------------------------------------------------
+
+# Segredos e dados reais — o motivo principal deste arquivo
+.env
+.env.*
+!.env.example
+.data/
+
+# Histórico e metadados do repositório
+.git/
+.github/
+.gitignore
+
+# Reconstruído dentro da imagem; copiar de fora traz binário da máquina errada
+node_modules/
+.next/
+
+# Ruído de desenvolvimento
+*.log
+dev.log
+prod.log
+*.tsbuildinfo
+.vercel/
+.vscode/
+.idea/
+.DS_Store
+
+# Testes e documentação não fazem parte do que é servido
+**/*.test.ts
+**/*.test.tsx
+README.md
+docs/

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "//": [
+    "Um app Next.js sobe na Vercel sem nenhum arquivo de configuração — a",
+    "detecção é automática. O que está aqui são as três coisas que a detecção",
+    "não tem como adivinhar.",
+    "",
+    "1. REGIÃO. O público é brasileiro e toda página é renderizada no servidor:",
+    "   cada visita faz ida e volta até a função. Em gru1 (São Paulo) isso custa",
+    "   dezenas de milissegundos; no padrão americano, centenas. Se você usar",
+    "   Supabase, escolha a região dele igual a esta — senão cada consulta",
+    "   atravessa o continente duas vezes.",
+    "",
+    "2. INSTALAÇÃO COM npm ci, que respeita o lockfile em vez de reresolver",
+    "   versões que ninguém testou.",
+    "",
+    "3. O tempo de execução das funções vem de `export const maxDuration = 60`",
+    "   nas próprias rotas, e não daqui: assim o valor fica ao lado do código",
+    "   que depende dele, e vale em qualquer plataforma."
+  ],
+
+  "regions": ["gru1"],
+  "installCommand": "npm ci",
+  "framework": "nextjs"
+}

@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------
+# Execução em contêiner, para desenvolvimento contra o build de produção e para
+# plataformas que consomem compose (Fly, Render, Coolify, um VPS).
+#
+# `compose.yaml` e não `docker-compose.yml`: é o nome que a especificação atual
+# define, e o que o `docker compose` procura primeiro. A versão com hífen é o
+# nome legado da ferramenta antiga.
+#
+# LEIA ISTO ANTES DE SUBIR
+# ------------------------
+# A imagem roda com NODE_ENV=production, e nesse modo o driver `local` é
+# RECUSADO de propósito por `assertDriverAllowed()`: ele grava num arquivo JSON
+# dentro do contêiner, que some quando o contêiner é recriado — o usuário
+# perderia o currículo sem ver erro nenhum.
+#
+# Ou seja: para este compose funcionar, o `.env.local` precisa ter SUPABASE_URL
+# e SUPABASE_ANON_KEY preenchidas. Sem elas o app sobe e falha na primeira
+# operação de banco, com uma mensagem dizendo exatamente isso.
+# ---------------------------------------------------------------------------
+
+services:
+  app:
+    build:
+      context: .
+      # O estágio final do Dockerfile. Nomeado explicitamente para um
+      # `--target` esquecido em outro lugar não publicar a imagem de build,
+      # que carrega o node_modules de desenvolvimento inteiro.
+      target: runner
+
+    # Os segredos entram por arquivo, em tempo de execução. NUNCA use
+    # `build.args` para isto: argumento de build fica gravado na camada da
+    # imagem e é recuperável por quem tiver a imagem.
+    env_file:
+      - .env.local
+
+    environment:
+      # A porta que o servidor do Next escuta dentro do contêiner.
+      PORT: 3000
+      # `0.0.0.0` e não `localhost`: escutando só no loopback, o processo fica
+      # inalcançável de fora do contêiner e o mapeamento de porta não funciona.
+      HOSTNAME: 0.0.0.0
+
+    ports:
+      - '3000:3000'
+
+    # Reinicia se o processo cair, mas não se você parar de propósito.
+    restart: unless-stopped
+
+    # Sem volume montado, e a ausência é decisão: montar o código de fora
+    # anularia a imagem que acabou de ser construída, e montar `.data/` daria
+    # sobrevida ao driver local, que não deve rodar em produção.
+
+    # O Dockerfile já traz um HEALTHCHECK; isto só o torna visível aqui, para
+    # quem lê o compose saber que existe.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - '-e'
+        - "fetch('http://127.0.0.1:3000/api/saude').then(r=>{process.exitCode=r.ok?0:1}).catch(()=>{process.exitCode=1})"
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+    # Endurecimento barato, no nível do contêiner:
+    security_opt:
+      # Impede que o processo ganhe privilégio novo via binário setuid.
+      - no-new-privileges:true
+    # O app não escreve em disco: o driver de produção é o Supabase, e o PDF é
+    # montado em memória. Sistema de arquivos somente leitura fecha a porta de
+    # um invasor deixar arquivo executável dentro do contêiner.
+    read_only: true
+    tmpfs:
+      # O Next precisa de um lugar temporário gravável mesmo assim.
+      - /tmp
