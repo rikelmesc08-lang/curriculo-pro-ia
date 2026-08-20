@@ -7,6 +7,7 @@ import { getRepository } from '@/lib/db';
 import { createSupabaseServerClient } from '@/lib/db/supabase/client';
 import { env } from '@/lib/env';
 import { formError, formSuccess, text, type FormState } from '@/lib/forms/state';
+import { destinoOuPadrao } from './destino';
 import { authenticateLocalUser, changeLocalPassword, createLocalUser } from './local';
 import { consumeLocalPasswordReset, createLocalPasswordReset } from './reset';
 import { createLocalSessionValue, getSessionUser, sessionCookie } from './session';
@@ -30,10 +31,6 @@ import {
  */
 
 /** Destino seguro pós-login: só caminho interno, nunca URL absoluta. */
-function safeNext(value: string): string {
-  if (!value.startsWith('/') || value.startsWith('//')) return '/app';
-  return value;
-}
 
 export async function signUpAction(_prev: FormState, formData: FormData): Promise<FormState> {
   // Limite por IP no cadastro: sem ele, um script cria contas em série para
@@ -53,7 +50,7 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
   }
 
   const { name, email, password } = parsed.data;
-  const next = safeNext(text(formData, 'proximo') || '/app');
+  const next = destinoOuPadrao(text(formData, 'proximo'));
 
   if (env.dbDriver() === 'supabase') {
     const client = await createSupabaseServerClient();
@@ -104,7 +101,7 @@ export async function signInAction(_prev: FormState, formData: FormData): Promis
   }
 
   const { email, password } = parsed.data;
-  const next = safeNext(text(formData, 'proximo') || '/app');
+  const next = destinoOuPadrao(text(formData, 'proximo'));
 
   // FORÇA BRUTA E CREDENTIAL STUFFING. Sem limite, esta ação é um oráculo de
   // senha com a velocidade da rede — e listas de e-mail e senha vazadas de

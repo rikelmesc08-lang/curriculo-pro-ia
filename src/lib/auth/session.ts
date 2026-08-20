@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation';
 import { getRepository } from '@/lib/db';
 import { createSupabaseServerClient } from '@/lib/db/supabase/client';
 import { env } from '@/lib/env';
+import { caminhoInterno } from './destino';
 import type { SessionUser } from '@/types/user';
 
 /**
@@ -146,23 +147,3 @@ export async function requireUser(returnTo?: string): Promise<SessionUser> {
   redirect(destination ? `/login?proximo=${encodeURIComponent(destination)}` : '/login');
 }
 
-/**
- * Aceita apenas caminho interno; qualquer outra coisa vira `null`.
- *
- * O destino sai daqui direto para `redirect()`. Hoje o valor vem do proxy,
- * que sobrescreve o cabeçalho com o próprio caminho da requisição — mas o
- * `matcher` do proxy é uma configuração, e no dia em que uma rota ficar de
- * fora dele, o cabeçalho passa a vir do CLIENTE. Sem esta validação, seria
- * um open redirect: `x-caminho-atual: https://site-falso/login` levaria a
- * vítima para uma tela de login clonada, vinda de um link legítimo deste
- * domínio.
- *
- * `//` é recusado junto com `http://` porque `//outro.site` é URL absoluta
- * de protocolo relativo — o truque que passa por uma checagem ingênua de
- * "começa com barra".
- */
-function caminhoInterno(valor: string | null | undefined): string | null {
-  if (!valor || !valor.startsWith('/') || valor.startsWith('//')) return null;
-  if (valor.includes('\\')) return null;
-  return valor;
-}
