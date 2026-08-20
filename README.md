@@ -121,6 +121,18 @@ Preencha as variáveis em Settings → Environment Variables. Nenhuma é necess�
 no build: o projeto não tem variável `NEXT_PUBLIC_*`, então nada é embutido no
 pacote do navegador e todos os segredos são lidos em tempo de execução.
 
+**Confira o domínio real antes de preencher `SITE_URL`.** A Vercel NÃO garante
+`<nome-do-projeto>.vercel.app`: se esse endereço já pertencer a outra conta, ela
+gera um com sufixo — foi o que aconteceu aqui, e o domínio virou
+`curriculo-pro-ia-tau.vercel.app`. Pior, o endereço sem sufixo existia e
+redirecionava para um site de terceiros, então um `SITE_URL` "óbvio" apontaria a
+prévia de link e o retorno de recuperação de senha para o domínio de um
+estranho, sem erro nenhum aparecer.
+
+O valor certo está em **Settings → Domains**, no domínio marcado como
+`Production`. Depois de alterar qualquer variável, é preciso **reimplantar**: a
+Vercel não reaplica variável em deploy já existente.
+
 ### Contêiner (Docker, Fly, Render, Railway)
 
 ```bash
