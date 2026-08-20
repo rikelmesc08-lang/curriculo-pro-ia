@@ -107,7 +107,8 @@ describe('registro de chamadas de IA (driver local)', () => {
     await localRepository.recordAiCall(ANA, {
       task: 'falha:reviewResume',
       fingerprint: `falha:${chave}:${Date.now()}`,
-      result: null,
+      // Objeto vazio, não `null`: a coluna é `jsonb not null` no Postgres.
+      result: {},
     });
 
     assert.equal(

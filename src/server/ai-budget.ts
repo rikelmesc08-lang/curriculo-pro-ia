@@ -131,7 +131,14 @@ const SEM_CUSTO: readonly string[] = ['configuracao', 'cota'];
  * "falha:" e o instante garantem que nenhuma consulta de cache — que procura
  * por um sha256 de 64 caracteres — vá casar com esta linha. Sem esse cuidado,
  * a tentativa fracassada entraria no cache e passaria a ser servida como se
- * fosse resultado, com conteúdo nulo, para toda repetição da mesma pergunta.
+ * fosse resultado, para toda repetição da mesma pergunta.
+ *
+ * O RESULTADO É UM OBJETO VAZIO, e não `null`: a coluna `result` de
+ * `public.ai_calls` é `jsonb not null`, e gravar nulo violaria a restrição. O
+ * erro cairia no `catch` abaixo, o app seguiria funcionando, e a falha nunca
+ * seria contabilizada no limite — em produção, em silêncio, reabrindo o
+ * buraco de custo que esta função existe para fechar. O driver local aceita
+ * qualquer um dos dois; o de produção, não.
  */
 async function registrarFalha(
   repository: Awaited<ReturnType<typeof getRepository>>,
@@ -143,7 +150,7 @@ async function registrarFalha(
     await repository.recordAiCall(userId, {
       task: `falha:${task}`,
       fingerprint: `falha:${key}:${Date.now()}`,
-      result: null,
+      result: {},
     });
   } catch (error) {
     console.error('[ai-budget] falha ao registrar tentativa malsucedida', error);
