@@ -8,6 +8,18 @@ import { cx } from '@/lib/utils';
  * começar do zero"), com conteúdos diferentes. A seta vira para baixo no
  * celular e para o lado no desktop — empilhar quatro caixas com seta lateral
  * numa tela de 360px quebra a leitura.
+ *
+ * DUAS CORREÇÕES QUE VALE NÃO DESFAZER:
+ *
+ * 1. `min-w-0` nos itens flex. Sem isso, um item de flexbox se recusa a
+ *    encolher abaixo da largura do próprio conteúdo (`min-width: auto` é o
+ *    padrão), e as quatro caixas lado a lado estouravam a tela em 37px —
+ *    rolagem horizontal na landing inteira, sem nenhum elemento aparentar
+ *    ser largo demais.
+ *
+ * 2. A virada para linha acontece em `lg`, não em `md`. Em 768px as quatro
+ *    caixas ficavam com ~170px cada, e o texto virava uma coluna de palavras
+ *    soltas. Tablet lê melhor empilhado.
  */
 
 export interface FlowStep {
@@ -19,12 +31,12 @@ export interface FlowStep {
 
 export function FlowSteps({ steps, className }: { steps: FlowStep[]; className?: string }) {
   return (
-    <ol className={cx('flex flex-col gap-2 md:flex-row md:items-stretch', className)}>
+    <ol className={cx('flex flex-col gap-2 lg:flex-row lg:items-stretch', className)}>
       {steps.map((step, index) => (
-        <li key={step.title} className="flex flex-1 flex-col md:flex-row md:items-center">
+        <li key={step.title} className="flex min-w-0 flex-1 flex-col lg:flex-row lg:items-center">
           <div
             className={cx(
-              'flex-1 rounded-xl border p-4',
+              'min-w-0 flex-1 rounded-xl border p-4',
               step.highlight
                 ? 'border-brand-200 bg-brand-50'
                 : 'border-line bg-surface'
@@ -47,9 +59,9 @@ export function FlowSteps({ steps, className }: { steps: FlowStep[]; className?:
           </div>
 
           {index < steps.length - 1 && (
-            <div className="flex items-center justify-center py-1 text-brand-400 md:px-1.5 md:py-0">
-              <Icon name="seta-baixo" className="h-5 w-5 md:hidden" />
-              <Icon name="seta-direita" className="hidden h-5 w-5 md:block" />
+            <div className="flex items-center justify-center py-1 text-brand-400 lg:px-1.5 lg:py-0">
+              <Icon name="seta-baixo" className="h-5 w-5 lg:hidden" />
+              <Icon name="seta-direita" className="hidden h-5 w-5 lg:block" />
             </div>
           )}
         </li>

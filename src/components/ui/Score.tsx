@@ -32,6 +32,11 @@ export function ScoreRing({
   const circumference = 2 * Math.PI * radius;
   const filled = (score / 100) * circumference;
 
+  // O texto interno acompanha o diametro. Sem isto, um anel pequeno (a vitrine
+  // do heroi usa 92px) mantinha a fonte do tamanho padrao e o rotulo
+  // "Boa aderencia" transbordava para fora do circulo.
+  const escala = size / 132;
+
   return (
     <div className="flex flex-col items-center">
       <div className="relative" style={{ width: size, height: size }}>
@@ -48,12 +53,20 @@ export function ScoreRing({
             strokeDasharray={`${filled} ${circumference}`}
           />
         </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className={cx('text-3xl font-bold tabular-nums', tone.text)}>
+        <div className="absolute inset-0 flex flex-col items-center justify-center px-3 text-center">
+          <span
+            className={cx('font-bold tabular-nums leading-none', tone.text)}
+            style={{ fontSize: `${30 * escala}px` }}
+          >
             {score}
-            <span className="text-lg">{suffix}</span>
+            <span style={{ fontSize: `${18 * escala}px` }}>{suffix}</span>
           </span>
-          <span className="text-[11px] font-medium text-muted">{tone.label}</span>
+          <span
+            className="mt-0.5 font-medium leading-tight text-muted"
+            style={{ fontSize: `${11 * escala}px` }}
+          >
+            {tone.label}
+          </span>
         </div>
       </div>
       {caption && <p className="mt-2 text-sm font-medium text-ink-soft">{caption}</p>}

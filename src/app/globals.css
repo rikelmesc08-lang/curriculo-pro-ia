@@ -47,6 +47,15 @@
 
   --shadow-card: 0 1px 2px rgb(17 24 39 / 0.04), 0 1px 3px rgb(17 24 39 / 0.06);
   --shadow-lift: 0 4px 12px rgb(17 24 39 / 0.06), 0 12px 32px rgb(17 24 39 / 0.08);
+  /* Sombra do card em perspectiva do herói. Tom azulado da marca em vez de
+     preto puro: sobre fundo claro, preto puro suja a cor em volta.
+     `rgb(30 53 138)` É o `--color-brand-900` (#1e358a) escrito por extenso —
+     `box-shadow` precisa do canal alfa separado, e a sintaxe de cor relativa
+     que permitiria referenciar o token direto ainda não tem suporte parelho
+     entre navegadores. Se mudar o azul da marca, mude estes três valores
+     junto. */
+  --shadow-showcase: 0 2px 8px rgb(30 53 138 / 0.06), 0 18px 36px rgb(30 53 138 / 0.10),
+    0 48px 80px rgb(30 53 138 / 0.10);
 }
 
 @layer base {

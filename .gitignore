@@ -47,3 +47,4 @@ next-env.d.ts
 
 # log do servidor de desenvolvimento
 dev.log
+prod.log
