@@ -79,8 +79,16 @@ acontece dentro de Server Action ou Route Handler.
 2. Rode `docs/schema.sql` inteiro no editor SQL do projeto.
 3. Preencha `SUPABASE_URL` e `SUPABASE_ANON_KEY` no `.env.local`.
 4. Em **Authentication → URL Configuration**, cadastre `{SITE_URL}/auth/recuperar`
-   como Redirect URL. Sem isso o link de recuperação de senha do e-mail é
-   recusado pelo Supabase.
+   e `{SITE_URL}/auth/confirmar` como Redirect URLs. Sem isso os links de
+   confirmação e de recuperação enviados por e-mail são recusados pelo Supabase.
+5. **Antes de abrir para o público, configure SMTP próprio** — veja
+   [`docs/email-smtp.md`](docs/email-smtp.md).
+
+   Isto NÃO é ajuste fino. O servidor de e-mail embutido do Supabase envia
+   **2 mensagens por hora no projeto inteiro**, e o campo não é editável: a
+   terceira pessoa que se cadastrar numa hora não recebe nada, não confirma a
+   conta e não entra. Enquanto isso não for feito, o painel também não deixa
+   editar os modelos, e todo mundo recebe o texto padrão em inglês.
 
 O esquema já vem com RLS ligada e política por operação em todas as tabelas. O
 arquivo é idempotente: se você já rodou uma versão anterior, rode de novo — é

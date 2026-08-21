@@ -1,0 +1,77 @@
+<!--
+  Modelo do e-mail "Confirm sign up" do Supabase, em português.
+
+  ONDE COLAR: painel do Supabase, Authentication -> Emails -> Confirm sign up.
+  O campo de assunto e o corpo só ficam editáveis DEPOIS de configurar SMTP
+  próprio; antes disso a Supabase manda o modelo padrão dela, em inglês.
+
+  Assunto sugerido:  Confirme seu e-mail — CurrículoPro IA
+
+  NÃO TROQUE `{{ .ConfirmationURL }}` POR OUTRA COISA. Essa variável aponta
+  para o endpoint de verificação da Supabase, que valida o código e só então
+  redireciona para `/auth/confirmar`. Montar a URL à mão pularia a validação e
+  o link deixaria de funcionar.
+
+  Por que HTML de tabela com estilo em atributo: cliente de e-mail não é
+  navegador. Gmail remove `<style>` externo, Outlook renderiza com o motor do
+  Word e ignora flexbox e grid. Tabela com `style` embutido é o que chega
+  igual nos dois.
+-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f6f8fb;padding:32px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background-color:#ffffff;border-radius:12px;border:1px solid #e6eaf0;">
+        <tr>
+          <td style="padding:32px 32px 0 32px;">
+            <p style="margin:0;font-size:18px;font-weight:700;color:#1e358a;">CurrículoPro IA</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 32px 0 32px;">
+            <h1 style="margin:0;font-size:22px;line-height:1.3;color:#111827;">Confirme seu e-mail</h1>
+            <p style="margin:12px 0 0 0;font-size:15px;line-height:1.6;color:#4b5563;">
+              Falta só um passo para sua conta ficar pronta. Toque no botão abaixo e você já entra direto.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 32px 0 32px;">
+            <table role="presentation" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background-color:#1d45d8;border-radius:8px;">
+                  <a href="{{ .ConfirmationURL }}"
+                     style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;">
+                    Confirmar meu e-mail
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 32px 0 32px;">
+            <!-- Alguns clientes bloqueiam ou reescrevem botão; o endereço em texto é o plano B. -->
+            <p style="margin:0;font-size:13px;line-height:1.6;color:#6b7280;">
+              Se o botão não funcionar, copie e cole este endereço no navegador:
+            </p>
+            <p style="margin:8px 0 0 0;font-size:12px;line-height:1.5;color:#1d45d8;word-break:break-all;">
+              {{ .ConfirmationURL }}
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 32px 32px 32px;border-top:1px solid #eef1f5;margin-top:24px;">
+            <p style="margin:24px 0 0 0;font-size:12px;line-height:1.6;color:#9ca3af;">
+              Este link vale uma vez só e expira. Se ele não servir mais, peça outro na
+              própria tela de entrada — tem um link de "reenviar confirmação" lá.
+            </p>
+            <p style="margin:12px 0 0 0;font-size:12px;line-height:1.6;color:#9ca3af;">
+              Se não foi você que criou esta conta, pode ignorar esta mensagem. Nada acontece
+              sem alguém clicar no botão acima.
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
