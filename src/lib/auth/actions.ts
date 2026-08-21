@@ -81,7 +81,10 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
     // "conta criada, agora entre" seria mentira: a pessoa ainda precisa clicar
     // no link do e-mail.
     if (!data.session) {
-      return formSuccess('Conta criada. Confirme seu e-mail pelo link que enviamos para entrar.');
+      return formSuccess(
+        'Conta criada. Confirme seu e-mail pelo link que enviamos para entrar.',
+        'confirmacao-pendente'
+      );
     }
   } else {
     const result = await createLocalUser({ name, email, password });
@@ -134,6 +137,24 @@ export async function signInAction(_prev: FormState, formData: FormData): Promis
       email: normalizeEmail(email),
       password,
     });
+
+    // E-MAIL NÃO CONFIRMADO É OUTRO PROBLEMA, e esconder isso atrás da mensagem
+    // genérica prende a pessoa num laço: ela tem a senha certa, ouve que está
+    // errada, vai redefinir a senha — e continua sem entrar, porque a senha
+    // nunca foi o problema. Não há saída possível a partir daí.
+    //
+    // Sobre revelar que a conta existe: o cadastro JÁ responde "Já existe uma
+    // conta com este e-mail" para qualquer endereço testado, então esta
+    // mensagem não abre nenhuma porta que o cadastro não tenha aberto antes.
+    // Trocar uma pessoa presa por um oráculo que já existe é mau negócio.
+    if (error?.code === 'email_not_confirmed') {
+      return formError(
+        'Sua conta ainda não foi confirmada. Confira o link que enviamos por e-mail.',
+        undefined,
+        'email-nao-confirmado'
+      );
+    }
+
     if (error) return formError(invalid);
   } else {
     const result = await authenticateLocalUser({ email, password });
@@ -150,6 +171,68 @@ export async function signInAction(_prev: FormState, formData: FormData): Promis
   limparLimite('loginPorEmail', email);
 
   redirect(next);
+}
+
+/**
+ * Reenvia o e-mail de confirmação do cadastro.
+ *
+ * Sem esta tela o cadastro tem um beco sem saída, e ele é fácil de alcançar: o
+ * link do e-mail vale uma vez e expira, e-mail de confirmação cai em spam com
+ * frequência, e caixas de entrada são apagadas sem cerimônia. Quem perde o link
+ * não consegue entrar (a conta não está confirmada), não consegue se cadastrar
+ * de novo ("e-mail já em uso") e não resolve nada redefinindo a senha — a senha
+ * nunca foi o problema. A conta fica inacessível para sempre.
+ *
+ * As mesmas duas defesas da recuperação de senha, pelas mesmas razões:
+ *
+ *   - LIMITE ANTES DE QUALQUER COISA, porque esta ação faz um servidor de
+ *     e-mail disparar mensagem para um endereço que ninguém precisa provar que
+ *     é seu — matéria-prima de inundação de caixa de entrada, com este produto
+ *     no campo do remetente;
+ *   - RESPOSTA SEMPRE IGUAL, para a tela não virar verificador de cadastro.
+ *     Vale inclusive quando o Supabase recusa porque a conta já está
+ *     confirmada: dizer isso entregaria o estado da conta de quem quer que
+ *     seja.
+ */
+export async function resendConfirmationAction(
+  _prev: FormState,
+  formData: FormData
+): Promise<FormState> {
+  const limiteIp = await verificarLimite('confirmacaoPorIp');
+  if (!limiteIp.permitido) return formError(mensagemDeLimite(limiteIp.esperarSegundos));
+
+  const parsed = emailSchema.safeParse(text(formData, 'email'));
+
+  // Formato pode falar: "joao@" não é conta de ninguém, e sem este aviso a
+  // pessoa fica esperando um e-mail que nunca foi endereçado a lugar nenhum.
+  if (!parsed.success) {
+    return formError('Confira o e-mail digitado.', { email: parsed.error.issues[0].message });
+  }
+
+  const confirmacao =
+    'Se existir uma conta não confirmada com esse e-mail, enviamos um link novo. Confira também a caixa de spam.';
+
+  const limiteEmail = await verificarLimite('confirmacaoPorEmail', parsed.data);
+  if (!limiteEmail.permitido) return formSuccess(confirmacao);
+
+  // Fora do Supabase não há confirmação de e-mail para reenviar: o driver
+  // local cria a conta já ativa. Devolver a mesma frase mantém a tela coerente
+  // em desenvolvimento, sem prometer um e-mail que não existe.
+  if (env.dbDriver() !== 'supabase') return formSuccess(confirmacao);
+
+  try {
+    const client = await createSupabaseServerClient();
+    await client.auth.resend({
+      type: 'signup',
+      email: normalizeEmail(parsed.data),
+      options: { emailRedirectTo: `${env.siteUrl()}/auth/confirmar` },
+    });
+  } catch (error) {
+    // Nem a falha pode variar com a existência da conta.
+    console.error('[resendConfirmationAction]', error);
+  }
+
+  return formSuccess(confirmacao);
 }
 
 export async function signOutAction(): Promise<void> {
@@ -333,7 +416,9 @@ export async function resetPasswordAction(
     const { data, error: sessionError } = await client.auth.getUser();
     if (sessionError || !data.user) {
       return formError(
-        'Este link expirou ou já foi usado. Peça um novo link de recuperação.'
+        'Este link expirou ou já foi usado. Peça um novo link de recuperação.',
+        undefined,
+        'link-de-recuperacao-invalido'
       );
     }
 
@@ -360,7 +445,7 @@ export async function resetPasswordAction(
         expirado: 'Este link expirou. Peça um novo link de recuperação.',
         usado: 'Este link já foi usado. Peça um novo se precisar trocar a senha de novo.',
       } as const;
-      return formError(mensagens[resultado.reason]);
+      return formError(mensagens[resultado.reason], undefined, 'link-de-recuperacao-invalido');
     }
 
     // NÃO cria sessão automaticamente. Quem redefiniu a senha passa pelo login

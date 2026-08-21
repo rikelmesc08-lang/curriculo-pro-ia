@@ -110,6 +110,20 @@ export function NewPasswordForm({ token }: { token?: string }) {
       {state.status === 'error' && state.message && (
         <Alert tone="danger" className="mt-5">
           {state.message}
+          {/*
+            "Peça um novo link" sem um link para pedir é um beco: esta tela só
+            é alcançada pelo e-mail, e quem chega com o link vencido não tem
+            para onde ir a não ser adivinhar o endereço da tela anterior. O
+            formulário abaixo continua visível, mas ele não resolve nada neste
+            estado — a prova de identidade é que expirou, não a senha.
+          */}
+          {state.code === 'link-de-recuperacao-invalido' && (
+            <p className="mt-2">
+              <Link href="/esqueci-senha" className="font-semibold underline">
+                Pedir um novo link de recuperação
+              </Link>
+            </p>
+          )}
         </Alert>
       )}
 

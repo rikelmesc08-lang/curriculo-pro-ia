@@ -57,11 +57,37 @@ export function AuthForm({
       {state.status === 'error' && state.message && (
         <Alert tone="danger" className="mt-5">
           {state.message}
+          {/*
+            A SAÍDA PRECISA VIR JUNTO DO ERRO. "Sua conta ainda não foi
+            confirmada" sem um caminho ao lado é a mesma armadilha de antes,
+            só que com o texto certo: a pessoa tem a senha correta, não
+            consegue entrar, e o único botão à vista continua sendo "Entrar".
+            Quem perdeu o e-mail não tem como adivinhar que existe reenvio.
+          */}
+          {state.code === 'email-nao-confirmado' && (
+            <p className="mt-2">
+              <Link href="/confirmar-email" className="font-semibold underline">
+                Reenviar o e-mail de confirmação
+              </Link>
+            </p>
+          )}
         </Alert>
       )}
       {state.status === 'success' && state.message && (
         <Alert tone="success" className="mt-5">
           {state.message}
+          {/*
+            Cadastro que precisa de confirmação também termina aqui, e a pessoa
+            fecha a aba achando que acabou. Se o e-mail não chegar, ela volta
+            sem lembrar que existe esta saída.
+          */}
+          {state.code === 'confirmacao-pendente' && (
+            <p className="mt-2">
+              <Link href="/confirmar-email" className="font-semibold underline">
+                Não recebeu? Reenviar o e-mail
+              </Link>
+            </p>
+          )}
         </Alert>
       )}
 

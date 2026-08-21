@@ -30,18 +30,28 @@ export async function GET(request: Request) {
   const base = env.siteUrl();
 
   if (!code || env.dbDriver() !== 'supabase') {
-    return NextResponse.redirect(new URL('/login?erro=confirmacao', base));
+    return NextResponse.redirect(new URL('/confirmar-email?erro=link-invalido', base));
   }
 
   const client = await createSupabaseServerClient();
   const { error } = await client.auth.exchangeCodeForSession(code);
 
   if (error) {
-    // Caso comum e nada alarmante: link já usado, ou expirado. A conta pode
-    // muito bem já estar confirmada — por isso o destino é o login, e não uma
-    // tela de erro que faria a pessoa achar que precisa se cadastrar de novo.
-    console.error('[auth/confirmar]', error.message);
-    return NextResponse.redirect(new URL('/login?erro=confirmacao', base));
+    console.error('[auth/confirmar]', error.code, error.message);
+
+    // O destino é a tela de REENVIO, e não o login: quem chega aqui com um
+    // link que não serve precisa de outro link, e mandá-la para o login a
+    // deixaria batendo numa senha que funciona contra uma conta que ainda não
+    // está confirmada.
+    //
+    // Expirado é distinguível pelo código. O resto NÃO É: um código já trocado
+    // e um código que nunca existiu produzem o mesmo `flow_state_not_found`.
+    // Por isso o caso restante usa o texto hedgeado de "link já usado", que
+    // vale nas duas leituras — inventar certeza aqui faria a tela afirmar algo
+    // que o servidor não sabe.
+    const expirado = error.code === 'otp_expired' || error.code === 'flow_state_expired';
+    const causa = expirado ? 'link-expirado' : 'link-usado';
+    return NextResponse.redirect(new URL(`/confirmar-email?erro=${causa}`, base));
   }
 
   // Sessão criada: a pessoa entra direto, sem digitar a senha de novo.

@@ -66,6 +66,13 @@ export const REGRAS = {
   cadastroPorIp: { limite: 10, janelaMs: 60 * 60_000 },
   recuperacaoPorEmail: { limite: 3, janelaMs: 60 * 60_000 },
   recuperacaoPorIp: { limite: 10, janelaMs: 60 * 60_000 },
+  // Reenvio de confirmação tem os mesmos números da recuperação, e pela mesma
+  // razão: as duas telas fazem um servidor de e-mail disparar mensagem para um
+  // endereço que quem pede não precisa provar que é seu. Sem limite, viram
+  // ferramenta de inundar a caixa de entrada alheia — e o remetente que aparece
+  // é este produto, que é quem termina na lista de spam.
+  confirmacaoPorEmail: { limite: 3, janelaMs: 60 * 60_000 },
+  confirmacaoPorIp: { limite: 10, janelaMs: 60 * 60_000 },
 } as const satisfies Record<string, Regra>;
 
 /**
