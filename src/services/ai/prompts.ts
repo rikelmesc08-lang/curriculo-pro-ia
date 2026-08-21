@@ -97,7 +97,12 @@ export function resumeToText(resume: Resume): string {
   if (resume.education.length === 0) lines.push('(nenhuma formação informada)');
   for (const item of resume.education) {
     const period = periodLabel(item.startDate, item.endDate, false);
-    lines.push(`- ${item.course || '(curso não informado)'} — ${item.institution || '(instituição não informada)'} (${item.degree || 'grau não informado'}, ${item.status}${period ? `, ${period}` : ''})`);
+    // Status em branco é OMITIDO, nunca enviado vazio. Mandar `(Técnico, ,
+    // 2017–2018)` convida o modelo a preencher a lacuna por conta própria —
+    // e foi assim que um currículo de curso concluído virou "cursando" no
+    // resumo reescrito.
+    const detalhes = [item.degree || 'grau não informado', item.status, period].filter(Boolean);
+    lines.push(`- ${item.course || '(curso não informado)'} — ${item.institution || '(instituição não informada)'} (${detalhes.join(', ')})`);
   }
 
   lines.push('', '== CURSOS E CERTIFICAÇÕES ==');

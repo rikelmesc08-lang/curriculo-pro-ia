@@ -66,9 +66,19 @@ export interface Experience {
   achievements: string[];
 }
 
-export type EducationStatus = 'concluido' | 'cursando' | 'trancado' | 'incompleto';
+/**
+ * O `''` é o estado inicial, e é deliberado: significa "a pessoa ainda não
+ * disse". Antes, formação nova nascia como `'cursando'`, e quem preenchia
+ * curso, instituição e datas sem abrir o seletor publicava um currículo
+ * afirmando estar estudando — uma afirmação que o APP fez, não a pessoa.
+ *
+ * O projeto promete que a IA não inventa nada sobre a vida de quem usa. O
+ * mesmo vale para o formulário: na dúvida, não afirma.
+ */
+export type EducationStatus = '' | 'concluido' | 'cursando' | 'trancado' | 'incompleto';
 
 export const EDUCATION_STATUS: { id: EducationStatus; label: string }[] = [
+  { id: '', label: 'Não informado' },
   { id: 'concluido', label: 'Concluído' },
   { id: 'cursando', label: 'Cursando' },
   { id: 'trancado', label: 'Trancado' },

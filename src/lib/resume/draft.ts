@@ -35,7 +35,7 @@ export function emptyExperience(): Experience {
 }
 
 export function emptyEducation(): Education {
-  return { id: newId(), institution: '', course: '', degree: '', startDate: '', endDate: '', status: 'cursando' };
+  return { id: newId(), institution: '', course: '', degree: '', startDate: '', endDate: '', status: '' };
 }
 
 export function emptyCertification(): Certification {

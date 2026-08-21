@@ -55,7 +55,10 @@ const educationSchema = z.object({
   degree: short,
   startDate: short,
   endDate: short,
-  status: z.enum(['concluido', 'cursando', 'trancado', 'incompleto']).default('cursando'),
+  // O padrão é vazio -- "não informado" -- e não 'cursando': ver a nota em
+  // types/resume.ts. Um padrão que afirma algo põe na boca da pessoa uma
+  // informação que ela nunca deu.
+  status: z.enum(['', 'concluido', 'cursando', 'trancado', 'incompleto']).default(''),
 });
 
 const certificationSchema = z.object({
