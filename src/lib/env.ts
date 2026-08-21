@@ -14,6 +14,28 @@ import 'server-only';
  * momento do import (build time), quando a variável ainda não existe.
  */
 
+/**
+ * Domínio do próprio deploy, quando este é um preview da Vercel.
+ *
+ * Devolve `undefined` em qualquer outra situação — produção, desenvolvimento
+ * local, Docker, Fly, Render — e é isso que mantém o resto do projeto
+ * independente de plataforma.
+ *
+ * O host é VALIDADO antes de virar URL. Ele vem da plataforma e não de um
+ * cliente, mas o valor termina dentro de `new URL()` e de link de e-mail; um
+ * host com barra ou arroba mudaria o destino do endereço montado, e a
+ * checagem custa nada.
+ */
+function urlDoPreview(): string | undefined {
+  if (process.env.VERCEL_ENV !== 'preview') return undefined;
+
+  const host = read('VERCEL_BRANCH_URL') ?? read('VERCEL_URL');
+  if (!host) return undefined;
+  if (!/^[a-z0-9][a-z0-9.-]{0,252}[a-z0-9]$/i.test(host)) return undefined;
+
+  return `https://${host}`;
+}
+
 export type DbDriver = 'local' | 'supabase';
 export type AiProviderId = 'gemini' | 'anthropic' | 'demo';
 
@@ -165,7 +187,29 @@ export const env = {
   /** Diretório do banco JSON do driver local. */
   localDataDir: () => read('LOCAL_DATA_DIR') ?? '.data',
 
-  siteUrl: () => read('SITE_URL') ?? 'http://localhost:3000',
+  /**
+   * Endereço público deste ambiente. É a base de link de e-mail, URL canônica
+   * e prévia de link.
+   *
+   * PREVIEW SE APONTA PARA SI MESMO. `SITE_URL` é um valor só, e em preview ele
+   * carrega o domínio de PRODUÇÃO — então todo fluxo que passa por aqui saía do
+   * preview e caía na produção. Na prática nenhum e-mail de confirmação ou de
+   * recuperação era testável antes do merge, que é justamente quando testar
+   * ainda adianta. O link ia parar num site rodando código antigo, sem erro
+   * nenhum aparecer.
+   *
+   * A EXCEÇÃO VALE SÓ EM PREVIEW. Produção continua lendo `SITE_URL` e nada
+   * mais: um deploy de produção que resolvesse o próprio endereço sozinho
+   * mandaria e-mail de cliente para um domínio gerado pela plataforma.
+   *
+   * `VERCEL_BRANCH_URL` antes de `VERCEL_URL` porque o primeiro é estável por
+   * branch e o segundo muda a cada deploy — e a lista de endereços permitidos
+   * do Supabase precisa casar com o que mandamos.
+   *
+   * Fora da Vercel nada disto existe, as variáveis são `undefined`, e a função
+   * se comporta exatamente como antes.
+   */
+  siteUrl: () => urlDoPreview() ?? read('SITE_URL') ?? 'http://localhost:3000',
 
   hasSiteUrl: () => Boolean(read('SITE_URL')),
 

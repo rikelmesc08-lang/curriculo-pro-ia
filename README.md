@@ -150,6 +150,21 @@ O valor certo está em **Settings → Domains**, no domínio marcado como
 `Production`. Depois de alterar qualquer variável, é preciso **reimplantar**: a
 Vercel não reaplica variável em deploy já existente.
 
+**Em preview, o `SITE_URL` é ignorado de propósito.** Como ele é um valor só
+para todos os ambientes, um preview usaria o domínio de produção — e todo link
+de e-mail sairia do preview para um site rodando outro código, sem erro nenhum
+aparecer. Por isso `env.siteUrl()` prefere `VERCEL_BRANCH_URL` quando
+`VERCEL_ENV === 'preview'`. Produção lê `SITE_URL` e nada mais.
+
+Para os e-mails funcionarem em preview, a lista de **Redirect URLs** do Supabase
+precisa cobrir os domínios de branch:
+
+```
+https://<projeto>-git-*.vercel.app/**
+```
+
+Fora da Vercel essas variáveis não existem e o comportamento é o de sempre.
+
 ### Contêiner (Docker, Fly, Render, Railway)
 
 ```bash
