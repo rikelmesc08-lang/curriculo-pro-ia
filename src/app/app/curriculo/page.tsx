@@ -4,6 +4,8 @@ import { getRepository } from '@/lib/db';
 import { emptyResumeContent } from '@/types/resume';
 import { toContent } from '@/lib/resume/draft';
 import { SectionTitle } from '@/components/ui/Card';
+import { ButtonLink } from '@/components/ui/Button';
+import { Alert } from '@/components/ui/Feedback';
 import { ResumeBuilder } from '@/components/resume/ResumeBuilder';
 
 /**
@@ -47,6 +49,23 @@ export default async function ResumeBuilderPage() {
         title="Crie seu currículo"
         description="Preencha etapa por etapa. Tudo é salvo automaticamente, e a pré-visualização mostra o resultado em tempo real."
       />
+
+      {/*
+        Só para quem está começando do zero.
+        A oferta some assim que existe currículo salvo: aí importar deixaria de
+        ser um atalho e passaria a ser risco de a pessoa apagar o próprio
+        trabalho sem perceber. E quem já preencheu o formulário não precisa mais
+        saber que a importação existe.
+      */}
+      {!existing && (
+        <Alert tone="info" title="Já tem um currículo pronto?" className="mb-5">
+          <p>Não precisa digitar tudo de novo — envie o PDF e a IA preenche este formulário para você conferir.</p>
+          <ButtonLink href="/app/curriculo/importar" variant="secondary" size="sm" className="mt-3">
+            Enviar meu currículo pronto
+          </ButtonLink>
+        </Alert>
+      )}
+
       <ResumeBuilder initialId={existing?.id ?? null} initialContent={initialContent} />
     </>
   );

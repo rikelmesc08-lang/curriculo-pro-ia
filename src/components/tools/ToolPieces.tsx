@@ -47,15 +47,33 @@ export function JobDescriptionInput({
 }
 
 /** Exibido quando a ferramenta depende de um currículo que ainda não existe. */
+/**
+ * A tela de quem chega numa ferramenta sem ter currículo salvo.
+ *
+ * ESTE ERA O MAIOR PONTO DE DESISTÊNCIA DO PRODUTO. A única saída oferecida
+ * aqui era "preencha o formulário guiado" — ou seja, quem já tinha um currículo
+ * pronto em PDF precisava redigitá-lo inteiro só para descobrir o que estava
+ * errado nele. A pessoa que mais precisa da ferramenta era justamente a que
+ * batia na porta mais alta.
+ *
+ * A IMPORTAÇÃO VEM PRIMEIRO, e não é detalhe de layout: quem chega aqui quase
+ * sempre JÁ TEM um currículo — foi por causa dele que veio. Criar do zero é o
+ * caso de quem ainda não tem nenhum, que é a minoria nesta tela.
+ */
 export function NoResumeNotice({ tool }: { tool: string }) {
   return (
     <EmptyState
       title="Você ainda não tem um currículo salvo"
-      description={`${tool} trabalha em cima do seu currículo. Preencha o formulário guiado primeiro — leva alguns minutos e fica salvo automaticamente.`}
+      description={`${tool} trabalha em cima do seu currículo. Se você já tem um pronto, envie o arquivo e a IA preenche tudo para você conferir — não precisa redigitar.`}
       action={
-        <ButtonLink href="/app/curriculo" className="uppercase tracking-wide">
-          Criar meu currículo
-        </ButtonLink>
+        <div className="flex flex-col items-center gap-3 sm:flex-row">
+          <ButtonLink href="/app/curriculo/importar" className="uppercase tracking-wide">
+            Enviar meu currículo pronto
+          </ButtonLink>
+          <ButtonLink href="/app/curriculo" variant="secondary">
+            Não tenho um. Criar do zero
+          </ButtonLink>
+        </div>
       }
     />
   );

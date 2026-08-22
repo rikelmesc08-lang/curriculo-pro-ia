@@ -51,6 +51,23 @@ function errorFromStatus(status: number, body: AnthropicResponse, task: string):
 }
 
 async function callModel(task: AiTask<unknown>, correction?: string): Promise<string> {
+  /**
+   * RECUSA EM VOZ ALTA, e nunca ignora o anexo.
+   *
+   * Este provedor monta `content` como texto puro. Deixar passar uma tarefa com
+   * arquivo mandaria ao modelo "extraia os dados do PDF acima" sem PDF nenhum,
+   * e ele responderia inventando um currículo inteiro — dado falso com cara de
+   * dado extraído, que é exatamente o que este produto promete não fazer.
+   */
+  if (task.attachment) {
+    throw new AiError(
+      'configuracao',
+      task.name,
+      'O provedor Anthropic não está montando anexos neste projeto.',
+      'A importação de currículo em arquivo só funciona com o Gemini configurado. Você ainda pode colar o texto do currículo.'
+    );
+  }
+
   const messages: { role: 'user' | 'assistant'; content: string }[] = [
     { role: 'user', content: task.prompt },
   ];
