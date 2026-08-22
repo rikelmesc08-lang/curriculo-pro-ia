@@ -1,5 +1,6 @@
 import 'server-only';
 
+import type { AiCallRecord } from '@/types/ai';
 import type { Application, ApplicationInput } from '@/types/application';
 import type { Resume, ResumeContent } from '@/types/resume';
 import type { AppUser } from '@/types/user';
@@ -30,6 +31,23 @@ export interface Repository {
   createResume(ownerId: string, content: ResumeContent): Promise<Resume>;
   updateResume(ownerId: string, id: string, content: ResumeContent): Promise<Resume | null>;
   deleteResume(ownerId: string, id: string): Promise<void>;
+
+  /**
+   * Quantas chamadas de IA o usuário fez desde `since` (ISO 8601).
+   *
+   * É o que sustenta o limite de uso. Fica no repositório, e não numa variável
+   * em memória, porque em plataforma serverless cada requisição pode cair num
+   * processo diferente — um contador em memória zera sozinho e o limite vira
+   * decoração.
+   */
+  countAiCalls(ownerId: string, since: string): Promise<number>;
+  /** Resposta guardada para a mesma pergunta, se ainda estiver dentro da janela. */
+  findAiCall(ownerId: string, fingerprint: string, since: string): Promise<AiCallRecord | null>;
+  /** Registra a chamada e guarda a resposta. Ver `src/server/ai-budget.ts`. */
+  recordAiCall(
+    ownerId: string,
+    entry: { task: string; fingerprint: string; result: unknown }
+  ): Promise<void>;
 
   listApplications(ownerId: string): Promise<Application[]>;
   createApplication(ownerId: string, input: ApplicationInput): Promise<Application>;

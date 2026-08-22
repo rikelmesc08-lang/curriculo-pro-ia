@@ -1,0 +1,79 @@
+name: CI
+
+# Roda no push da branch principal e em todo pull request. A combinação cobre
+# os dois momentos que importam: antes de mesclar, e depois — porque um merge
+# pode quebrar mesmo com o PR verde, quando a base andou no meio do caminho.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Um push novo cancela a execução anterior do mesmo ramo. Sem isto, uma
+# sequência de commits deixa uma fila de execuções obsoletas consumindo minutos
+# para responder sobre código que ninguém mais vai ler.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Menor privilégio: nada aqui escreve no repositório.
+permissions:
+  contents: read
+
+jobs:
+  verificar:
+    name: Lint, tipos, testes e build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # NENHUMA VARIÁVEL DE AMBIENTE, e isso é a checagem mais valiosa deste
+    # arquivo: o projeto tem que continuar buildando e testando sem chave de
+    # API, sem Supabase e sem segredo de sessão. Se um dia alguém tornar alguma
+    # delas obrigatória para o build, quebra aqui — e não no primeiro clone de
+    # outra pessoa.
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v7
+
+      - name: Preparar o Node
+        uses: actions/setup-node@v7
+        with:
+          # Lê o .nvmrc: uma fonte só para a versão do Node, aqui e na máquina
+          # de quem desenvolve.
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Instalar dependências
+        # `npm ci` e não `npm install`: instala exatamente o que está no
+        # package-lock.json e falha se os dois estiverem fora de sincronia —
+        # que é justamente o problema que só aparece na máquina dos outros.
+        run: npm ci
+
+      # A ordem é do mais barato para o mais caro. Um erro de lint não deveria
+      # custar o build inteiro para ser descoberto.
+      - name: ESLint
+        run: npm run lint
+
+      # PASSO OBRIGATÓRIO ANTES DO tsc, e a falta dele derrubou a primeira
+      # execução deste workflow.
+      #
+      # `PageProps` e `LayoutProps` são tipos GLOBAIS que o Next gera em
+      # `.next/types/` a partir das rotas do projeto. Num clone limpo esse
+      # diretório não existe, e as oito páginas que usam esses tipos falham com
+      # "Cannot find name". Na máquina de quem desenvolve o problema não
+      # aparece — o `.next` já está lá de algum `npm run dev` anterior, e por
+      # isso o erro só existe no CI.
+      #
+      # `typegen` gera só as definições, sem compilar a aplicação: custa
+      # segundos, contra o build inteiro.
+      - name: Gerar tipos de rota
+        run: npx next typegen
+
+      - name: Verificação de tipos
+        run: npx tsc --noEmit
+
+      - name: Testes
+        run: npm test
+
+      - name: Build de produção
+        run: npm run build

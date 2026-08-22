@@ -14,7 +14,19 @@ import { normalizeForCompare } from '@/lib/utils';
  * interpretação de IA.
  */
 
-/** Palavras que aparecem em qualquer vaga e não distinguem nada. */
+/**
+ * Palavras que aparecem em qualquer vaga e não distinguem nada.
+ *
+ * A lista cresce por observação, não por adivinhação. O último bloco entrou
+ * depois de uma análise real devolver "afins, boa, cursando, elaboracao" como
+ * palavras-chave ausentes do currículo — termos que não dizem nada sobre a vaga
+ * e que faziam a tela parecer desleixada.
+ *
+ * O que NÃO entra aqui é termo que distingue de verdade. "contabeis" apareceu
+ * no mesmo ruído e ficou de fora de propósito: "Ciências Contábeis" é uma
+ * qualificação real, e silenciá-la esconderia uma lacuna verdadeira do
+ * currículo.
+ */
 const STOPWORDS = new Set(
   `a o os as um uma uns umas de do da dos das em no na nos nas por para com sem sob sobre ate ate
    e ou mas que se ao aos à às pelo pela pelos pelas este esta estes estas esse essa esses essas
@@ -29,7 +41,13 @@ const STOPWORDS = new Set(
    responsabilidade responsabilidades atribuicao atribuicoes descricao sobre nossa nosso equipe
    time buscamos procuramos oferecemos oferecer atuar atuara realizar realizara apoiar auxiliar
    garantir manter participar acompanhar ainda bem melhor maior menor novo nova ano anos mes meses
-   dia dias hora horas r$ clt pj home office presencial hibrido remoto`
+   dia dias hora horas r$ clt pj home office presencial hibrido remoto
+   afim afins boa boas bom bons solida solido solidas solidos forte fortes
+   cursando cursado cursada completo completa completos completas incompleto
+   incompleta elaboracao elaborar elaborando vivencia vivencias dominio dominar
+   necessario necessaria necessarios necessarias imprescindivel imprescindiveis
+   obrigatorio obrigatoria possuir possua capacidade facilidade disponibilidade
+   preferencia preferencialmente minimo minima principal principais`
     .split(/\s+/)
     .filter(Boolean)
 );

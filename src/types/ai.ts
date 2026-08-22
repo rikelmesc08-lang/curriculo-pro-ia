@@ -14,6 +14,37 @@ export interface AiEnvelope<T> {
   data: T;
   /** Aviso exibido junto do resultado (ex.: modo demonstração ativo). */
   notice?: string;
+  /**
+   * Resultado reaproveitado de uma chamada anterior idêntica, sem custo novo.
+   *
+   * Aparece na UI. Um número que não muda depois de um clique precisa ter
+   * explicação visível, senão parece que o botão quebrou.
+   */
+  cached?: boolean;
+}
+
+/**
+ * Registro de uma chamada de IA já feita.
+ *
+ * Serve a DOIS propósitos com uma tabela só: contar quantas chamadas o usuário
+ * fez na janela (limite de uso) e devolver a resposta guardada quando a mesma
+ * pergunta se repete (cache). Servir do cache não cria registro novo — logo,
+ * repetir a pergunta não consome cota.
+ *
+ * NÃO guarda o texto de entrada: só o `fingerprint`, que é um hash. O currículo
+ * já mora na tabela de currículos; não há motivo para uma segunda cópia dele
+ * espalhada aqui.
+ */
+export interface AiCallRecord {
+  id: string;
+  ownerId: string;
+  /** Nome da tarefa, para diagnóstico e para o hash não colidir entre telas. */
+  task: string;
+  /** sha256 de (tarefa + entrada). Ver `src/server/ai-budget.ts`. */
+  fingerprint: string;
+  /** Saída já validada por schema, pronta para devolver de novo. */
+  result: unknown;
+  createdAt: string;
 }
 
 /** Item extraído da descrição da vaga. */
@@ -129,3 +160,120 @@ export interface RewrittenExperience {
   achievements: string[];
   changes: string[];
 }
+
+// ---------------------------------------------------------------------------
+// Análise completa do currículo
+// ---------------------------------------------------------------------------
+
+/**
+ * As oito dimensões avaliadas.
+ *
+ * São ids fechados, e não texto livre, porque a tela desenha uma barra por
+ * dimensão e a comparação entre duas análises do mesmo currículo só faz sentido
+ * se as dimensões forem sempre as mesmas.
+ */
+export type ReviewDimensionId =
+  | 'clareza'
+  | 'organizacao'
+  | 'erros'
+  | 'resumo'
+  | 'experiencias'
+  | 'habilidades'
+  | 'palavras-chave'
+  | 'ats';
+
+export interface ReviewDimension {
+  id: ReviewDimensionId;
+  label: string;
+  /** 0–100. */
+  score: number;
+  comment: string;
+}
+
+/** Um problema concreto encontrado, com onde está e como resolver. */
+export interface ReviewIssue {
+  /** Onde está, em linguagem de usuário: "Resumo profissional", "Experiência na Loja X". */
+  where: string;
+  problem: string;
+  /** O que fazer. Nunca "invente um número" nem "diga que você tem". */
+  fix: string;
+  severity: 'alta' | 'media' | 'baixa';
+}
+
+/**
+ * A versão otimizada do currículo.
+ *
+ * Mesma forma de `OptimizedResume`, e isso é de propósito: as experiências são
+ * casadas por `id` na hora de aplicar (`applyOptimizationAction`), então um id
+ * inventado pelo modelo é descartado pelo código, não pela boa vontade dele.
+ */
+export interface ReviewOptimizedResume {
+  summary: string;
+  experiences: { id: string; description: string; responsibilities: string[]; achievements: string[] }[];
+  skillsOrder: string[];
+  notes: string[];
+}
+
+/** Resultado completo. Só chega inteiro a quem tem direito a ele. */
+export interface ResumeReview {
+  /** 0–100, o currículo como está hoje. */
+  score: number;
+  /**
+   * 0–100, o mesmo currículo depois de aplicadas as correções apontadas.
+   *
+   * É a "indicação de quanto dá para melhorar". Nunca é menor que `score`, e
+   * não é promessa de contratação — ver `REVIEW_DISCLAIMER`.
+   */
+  potentialScore: number;
+  dimensions: ReviewDimension[];
+  strengths: string[];
+  weaknesses: string[];
+  opportunities: string[];
+  issues: ReviewIssue[];
+  recommendations: string[];
+  keywords: { present: string[]; missing: string[] };
+  optimized: ReviewOptimizedResume;
+}
+
+/**
+ * O que o plano gratuito recebe.
+ *
+ * É um TIPO SEPARADO, e não `Partial<ResumeReview>`, porque a diferença entre
+ * os dois precisa ser visível no compilador. A prévia é MONTADA CAMPO A CAMPO a
+ * partir do resultado completo (ver `src/services/ai/review-gate.ts`) — nunca
+ * espalhada com `...review` e depois podada. Espalhar-e-podar é como vaza
+ * conteúdo pago: basta alguém acrescentar um campo novo ao tipo completo e
+ * esquecer de removê-lo aqui.
+ */
+export interface ResumeReviewPreview {
+  score: number;
+  potentialScore: number;
+  dimensions: ReviewDimension[];
+  strengths: string[];
+  /** Alguns problemas, com a correção junto — a prévia precisa ser útil de verdade. */
+  issues: ReviewIssue[];
+  /** Primeiras linhas do resumo reescrito, cortadas. */
+  summaryPreview: string;
+  /** Quanto ficou de fora, para o CTA poder ser específico em vez de vago. */
+  hidden: {
+    issues: number;
+    recommendations: number;
+    rewrittenExperiences: number;
+    opportunities: number;
+  };
+}
+
+/**
+ * O que a Server Action devolve.
+ *
+ * União discriminada de propósito: não existe "objeto completo com uns campos
+ * apagados" trafegando até o navegador. Quem não pagou recebe um objeto que
+ * nunca conteve o texto pago — esconder no cliente com CSS seria entregar o
+ * conteúdo para qualquer pessoa que abrisse as ferramentas de desenvolvedor.
+ */
+export type ReviewDelivery =
+  | { access: 'completo'; review: ResumeReview }
+  | { access: 'previa'; preview: ResumeReviewPreview };
+
+export const REVIEW_DISCLAIMER =
+  'Pontuação estimada a partir de boas práticas de currículo e da vaga informada. Não reproduz o funcionamento de nenhum ATS específico nem prevê resultado de processo seletivo.';

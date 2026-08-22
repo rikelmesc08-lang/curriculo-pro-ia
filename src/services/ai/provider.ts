@@ -34,7 +34,7 @@ export interface AiTask<T> {
 }
 
 export interface AiProvider {
-  id: 'anthropic' | 'demo';
+  id: 'gemini' | 'anthropic' | 'demo';
   mode: AiMode;
   run<T>(task: AiTask<T>): Promise<T>;
 }
@@ -42,22 +42,36 @@ export interface AiProvider {
 /** Erro de IA que a UI sabe exibir. Nunca vaza corpo de resposta cru para a tela. */
 export class AiError extends Error {
   readonly task: string;
-  readonly kind: 'configuracao' | 'rede' | 'formato' | 'limite';
+  readonly kind: 'configuracao' | 'rede' | 'formato' | 'limite' | 'bloqueio' | 'cota';
+  /**
+   * Mensagem específica para este caso, quando a genérica do `kind` não basta.
+   *
+   * Existe por causa da cota: "você já fez 40 análises hoje, o limite volta à
+   * meia-noite" resolve o problema da pessoa; "limite atingido" só a deixa
+   * clicando de novo.
+   */
+  private readonly friendly?: string;
 
-  constructor(kind: AiError['kind'], task: string, message: string) {
+  constructor(kind: AiError['kind'], task: string, message: string, friendly?: string) {
     super(message);
     this.name = 'AiError';
     this.kind = kind;
     this.task = task;
+    this.friendly = friendly;
   }
 
   /** Mensagem escrita para o usuário final, não para o log. */
   get userMessage(): string {
+    if (this.friendly) return this.friendly;
     switch (this.kind) {
       case 'configuracao':
         return 'A IA não está configurada neste ambiente. Confira a chave de API nas variáveis de ambiente.';
       case 'limite':
         return 'A IA atingiu o limite de uso no momento. Tente de novo em alguns minutos.';
+      case 'bloqueio':
+        return 'Os filtros de conteúdo da IA recusaram este texto. Revise o que foi colado e tente de novo.';
+      case 'cota':
+        return 'Você atingiu o limite de análises deste período. Tente de novo mais tarde.';
       case 'formato':
         return 'A IA respondeu num formato inesperado. Tente de novo — se persistir, reduza o tamanho do texto enviado.';
       case 'rede':

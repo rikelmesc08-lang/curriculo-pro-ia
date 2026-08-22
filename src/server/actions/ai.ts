@@ -2,9 +2,12 @@
 
 import { requireUser } from '@/lib/auth/session';
 import { getRepository } from '@/lib/db';
+import { env } from '@/lib/env';
 import { fail, ok, type AiActionResult } from '@/lib/forms/action-result';
 import { parseResumeContent } from '@/lib/resume/schema';
+import { capInput, runWithBudget } from '@/server/ai-budget';
 import { aiErrorMessage } from '@/services/ai';
+import { toDelivery } from '@/services/ai/review-gate';
 import {
   analyzeAts,
   analyzeJobDescription,
@@ -15,6 +18,7 @@ import {
   improveProfessionalSummary,
   matchResumeToJob,
   optimizeResume,
+  reviewResume,
 } from '@/services/ai/resume-ai';
 import type {
   AiEnvelope,
@@ -26,6 +30,7 @@ import type {
   OptimizedResume,
   RecruiterMessage,
   RecruiterMessageKind,
+  ReviewDelivery,
   RewrittenExperience,
   RewrittenText,
 } from '@/types/ai';
@@ -45,6 +50,20 @@ import type { Resume } from '@/types/resume';
 
 const MAX_JOB_LENGTH = 20000;
 
+/**
+ * O currículo sem os campos que mudam a cada requisição.
+ *
+ * `draftToResume` carimba `createdAt` e `updatedAt` com a hora atual, porque o
+ * tipo `Resume` os exige. Se esses campos entrassem na impressão digital do
+ * cache, cada clique geraria uma chave nova e o cache nunca acertaria uma vez
+ * sequer — um cache que só grava é só desperdício de disco.
+ *
+ * Nada aqui altera o que vai para o prompt: é só a identidade da pergunta.
+ */
+function resumeKey(resume: Resume): unknown {
+  return { ...resume, id: '', ownerId: '', createdAt: '', updatedAt: '' };
+}
+
 /** Monta um `Resume` a partir do rascunho do cliente, sem tocar no banco. */
 function draftToResume(userId: string, content: unknown): Resume {
   const parsed = parseResumeContent(content);
@@ -53,8 +72,7 @@ function draftToResume(userId: string, content: unknown): Resume {
 }
 
 function sanitizeJob(value: unknown): string {
-  if (typeof value !== 'string') return '';
-  return value.slice(0, MAX_JOB_LENGTH);
+  return capInput(value, MAX_JOB_LENGTH);
 }
 
 /** Envolve a chamada convertendo qualquer erro em resultado exibível. */
@@ -70,12 +88,14 @@ async function guard<T>(run: () => Promise<AiEnvelope<T>>): Promise<AiActionResu
 }
 
 export async function analyzeJobAction(jobDescription: string): Promise<AiActionResult<JobAnalysis>> {
-  await requireUser('/app/analisar-vaga');
+  const user = await requireUser('/app/analisar-vaga');
   const job = sanitizeJob(jobDescription);
   if (job.trim().length < 40) {
     return fail('Cole a descrição completa da vaga — com menos de 40 caracteres não há o que analisar.');
   }
-  return guard(() => analyzeJobDescription(job));
+  return guard(() =>
+    runWithBudget(user.id, 'analyzeJobDescription', { job }, () => analyzeJobDescription(job))
+  );
 }
 
 export async function matchResumeAction(
@@ -87,7 +107,12 @@ export async function matchResumeAction(
   if (job.trim().length < 40) {
     return fail('Cole a descrição da vaga para comparar com o seu currículo.');
   }
-  return guard(() => matchResumeToJob({ resume: draftToResume(user.id, content), jobDescription: job }));
+  const resume = draftToResume(user.id, content);
+  return guard(() =>
+    runWithBudget(user.id, 'matchResumeToJob', { resume: resumeKey(resume), job }, () =>
+      matchResumeToJob({ resume, jobDescription: job })
+    )
+  );
 }
 
 export async function atsAnalysisAction(
@@ -95,8 +120,12 @@ export async function atsAnalysisAction(
   jobDescription: string
 ): Promise<AiActionResult<AtsAnalysis>> {
   const user = await requireUser('/app/analisar-vaga');
+  const resume = draftToResume(user.id, content);
+  const job = sanitizeJob(jobDescription);
   return guard(() =>
-    analyzeAts({ resume: draftToResume(user.id, content), jobDescription: sanitizeJob(jobDescription) })
+    runWithBudget(user.id, 'analyzeAts', { resume: resumeKey(resume), job }, () =>
+      analyzeAts({ resume, jobDescription: job })
+    )
   );
 }
 
@@ -105,11 +134,12 @@ export async function improveSummaryAction(
   jobDescription: string
 ): Promise<AiActionResult<RewrittenText>> {
   const user = await requireUser('/app/curriculo');
+  const resume = draftToResume(user.id, content);
+  const job = sanitizeJob(jobDescription);
   return guard(() =>
-    improveProfessionalSummary({
-      resume: draftToResume(user.id, content),
-      jobDescription: sanitizeJob(jobDescription),
-    })
+    runWithBudget(user.id, 'improveProfessionalSummary', { resume: resumeKey(resume), job }, () =>
+      improveProfessionalSummary({ resume, jobDescription: job })
+    )
   );
 }
 
@@ -119,12 +149,15 @@ export async function improveExperienceAction(
   jobDescription: string
 ): Promise<AiActionResult<RewrittenExperience>> {
   const user = await requireUser('/app/curriculo');
+  const resume = draftToResume(user.id, content);
+  const job = sanitizeJob(jobDescription);
   return guard(() =>
-    improveExperience({
-      resume: draftToResume(user.id, content),
-      experienceId,
-      jobDescription: sanitizeJob(jobDescription),
-    })
+    runWithBudget(
+      user.id,
+      'improveExperience',
+      { resume: resumeKey(resume), experienceId, job },
+      () => improveExperience({ resume, experienceId, jobDescription: job })
+    )
   );
 }
 
@@ -137,7 +170,12 @@ export async function optimizeResumeAction(
   if (job.trim().length < 40) {
     return fail('Cole a descrição da vaga para adaptar o currículo a ela.');
   }
-  return guard(() => optimizeResume({ resume: draftToResume(user.id, content), jobDescription: job }));
+  const resume = draftToResume(user.id, content);
+  return guard(() =>
+    runWithBudget(user.id, 'optimizeResume', { resume: resumeKey(resume), job }, () =>
+      optimizeResume({ resume, jobDescription: job })
+    )
+  );
 }
 
 export async function coverLetterAction(
@@ -147,13 +185,16 @@ export async function coverLetterAction(
   role: string
 ): Promise<AiActionResult<CoverLetter>> {
   const user = await requireUser('/app/carta');
+  const resume = draftToResume(user.id, content);
+  const input = {
+    jobDescription: sanitizeJob(jobDescription),
+    company: capInput(company, 200),
+    role: capInput(role, 200),
+  };
   return guard(() =>
-    generateCoverLetter({
-      resume: draftToResume(user.id, content),
-      jobDescription: sanitizeJob(jobDescription),
-      company: String(company ?? '').slice(0, 200),
-      role: String(role ?? '').slice(0, 200),
-    })
+    runWithBudget(user.id, 'generateCoverLetter', { resume: resumeKey(resume), ...input }, () =>
+      generateCoverLetter({ resume, ...input })
+    )
   );
 }
 
@@ -162,11 +203,12 @@ export async function interviewQuestionsAction(
   jobDescription: string
 ): Promise<AiActionResult<{ questions: InterviewQuestion[] }>> {
   const user = await requireUser('/app/entrevista');
+  const resume = draftToResume(user.id, content);
+  const job = sanitizeJob(jobDescription);
   return guard(() =>
-    generateInterviewQuestions({
-      resume: draftToResume(user.id, content),
-      jobDescription: sanitizeJob(jobDescription),
-    })
+    runWithBudget(user.id, 'generateInterviewQuestions', { resume: resumeKey(resume), job }, () =>
+      generateInterviewQuestions({ resume, jobDescription: job })
+    )
   );
 }
 
@@ -178,14 +220,17 @@ export async function recruiterMessageAction(
   context: string
 ): Promise<AiActionResult<RecruiterMessage>> {
   const user = await requireUser('/app/mensagens');
+  const resume = draftToResume(user.id, content);
+  const input = {
+    kind,
+    company: capInput(company, 200),
+    role: capInput(role, 200),
+    context: capInput(context, 2000),
+  };
   return guard(() =>
-    generateRecruiterMessage({
-      resume: draftToResume(user.id, content),
-      kind,
-      company: String(company ?? '').slice(0, 200),
-      role: String(role ?? '').slice(0, 200),
-      context: String(context ?? '').slice(0, 2000),
-    })
+    runWithBudget(user.id, 'generateRecruiterMessage', { resume: resumeKey(resume), ...input }, () =>
+      generateRecruiterMessage({ resume, ...input })
+    )
   );
 }
 
@@ -202,5 +247,50 @@ export async function loadLatestResumeAction(): Promise<AiActionResult<Resume | 
   } catch (error) {
     console.error('[loadLatestResumeAction]', error);
     return fail('Não conseguimos carregar seu currículo agora.');
+  }
+}
+
+/**
+ * Análise completa do currículo.
+ *
+ * É a única ação que devolve `ReviewDelivery` em vez do resultado direto, e o
+ * motivo está em `src/services/ai/review-gate.ts`: o corte entre a prévia
+ * gratuita e o resultado completo acontece AQUI, no servidor, antes de virar
+ * resposta. Quem está no plano gratuito recebe um objeto que nunca conteve o
+ * texto pago — não há nada escondido no navegador para alguém encontrar.
+ *
+ * O resultado completo é guardado no cache mesmo quando só a prévia é
+ * entregue. Assim, no dia em que a pessoa desbloquear, o texto já existe: ela
+ * vê o resultado na hora e a IA não é chamada uma segunda vez pela mesma
+ * pergunta.
+ */
+export async function resumeReviewAction(
+  content: unknown,
+  jobDescription: string
+): Promise<AiActionResult<ReviewDelivery>> {
+  const user = await requireUser('/app/analise');
+  const resume = draftToResume(user.id, content);
+  const job = sanitizeJob(jobDescription);
+
+  try {
+    const envelope = await runWithBudget(
+      user.id,
+      'reviewResume',
+      { resume: resumeKey(resume), job },
+      () => reviewResume({ resume, jobDescription: job })
+    );
+
+    return ok({
+      mode: envelope.mode,
+      notice: envelope.notice,
+      cached: envelope.cached,
+      data: toDelivery(envelope.data, {
+        plan: user.plan,
+        paywallEnabled: env.aiPaywallEnabled(),
+      }),
+    });
+  } catch (error) {
+    console.error('[ai-action]', error);
+    return fail(aiErrorMessage(error));
   }
 }

@@ -18,6 +18,7 @@ export type AnalyticsEventName =
   | 'job_analysis_started'
   | 'job_analysis_completed'
   | 'ats_analysis'
+  | 'resume_review'
   | 'cover_letter_generated'
   | 'interview_prep'
   | 'pdf_download'
@@ -39,6 +40,9 @@ export interface AnalyticsProperties {
   job_analysis_started: Record<string, never>;
   job_analysis_completed: { modo: 'real' | 'demo'; termos: number };
   ats_analysis: { modo: 'real' | 'demo'; pontuacao: number };
+  // `acesso` mede quantas análises param na prévia — é o número que diz se o
+  // corte entre gratuito e pago está no lugar certo. Nenhum conteúdo junto.
+  resume_review: { modo: 'real' | 'demo'; pontuacao: number; acesso: 'completo' | 'previa' };
   cover_letter_generated: { modo: 'real' | 'demo' };
   interview_prep: { modo: 'real' | 'demo'; perguntas: number };
   pdf_download: { modelo: string };

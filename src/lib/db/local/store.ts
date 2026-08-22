@@ -3,6 +3,8 @@ import 'server-only';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { env } from '@/lib/env';
+import type { StoredPasswordReset } from '@/lib/auth/reset';
+import type { AiCallRecord } from '@/types/ai';
 import type { Application } from '@/types/application';
 import type { Resume } from '@/types/resume';
 
@@ -35,10 +37,14 @@ export interface DatabaseShape {
   users: StoredUser[];
   resumes: Resume[];
   applications: Application[];
+  /** Contador de uso e cache da IA. Ver `src/server/ai-budget.ts`. */
+  aiCalls: AiCallRecord[];
+  /** Tokens de recuperação de senha. Ver `src/lib/auth/reset.ts`. */
+  passwordResets: StoredPasswordReset[];
 }
 
 function emptyDatabase(): DatabaseShape {
-  return { version: 1, users: [], resumes: [], applications: [] };
+  return { version: 1, users: [], resumes: [], applications: [], aiCalls: [], passwordResets: [] };
 }
 
 function databasePath(): string {
@@ -71,6 +77,11 @@ async function readDatabase(): Promise<DatabaseShape> {
       users: parsed.users ?? [],
       resumes: parsed.resumes ?? [],
       applications: parsed.applications ?? [],
+      // Ausentes nos bancos gravados antes destas colunas existirem. Ler como
+      // lista vazia migra o arquivo sozinho, sem script e sem quebrar quem já
+      // tinha dado em disco.
+      aiCalls: parsed.aiCalls ?? [],
+      passwordResets: parsed.passwordResets ?? [],
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;

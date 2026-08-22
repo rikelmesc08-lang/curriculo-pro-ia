@@ -1,59 +1,60 @@
 import 'server-only';
 
-import Anthropic from '@anthropic-ai/sdk';
 import { env } from '@/lib/env';
+import { extractJson } from './json';
 import { AiError, type AiProvider, type AiTask } from './provider';
 
 /**
- * Provedor real, via API da Anthropic.
+ * Provedor opcional, via API da Anthropic.
  *
- * Trocar de provedor significa escrever outro arquivo como este e devolvê-lo
- * em `getAiProvider()`. Nada fora desta pasta importa o SDK — nem componente,
- * nem Server Action, nem página.
+ * NÃO É O PADRÃO e não é exigido em lugar nenhum: o padrão é `gemini`, que tem
+ * camada gratuita. Este arquivo continua no projeto por dois motivos — quem já
+ * tem crédito na Anthropic pode ligar com `AI_PROVIDER=anthropic`, e ele é a
+ * prova de que a abstração de provedor funciona de verdade, com dois provedores
+ * reais implementados contra o mesmo contrato.
+ *
+ * `fetch` em vez do SDK oficial, pelo mesmo motivo do Gemini: a chamada é um
+ * POST com JSON, e assim o projeto não carrega um pacote da Anthropic para
+ * quem nunca vai usá-la.
  */
 
-let client: Anthropic | null = null;
+const ENDPOINT = 'https://api.anthropic.com/v1/messages';
+const API_VERSION = '2023-06-01';
+const TIMEOUT_MS = 45_000;
 
-function getClient(): Anthropic {
-  if (client) return client;
-  const apiKey = env.anthropicApiKey();
-  if (!apiKey) {
+interface AnthropicResponse {
+  content?: { type?: string; text?: string }[];
+  stop_reason?: string;
+  error?: { type?: string; message?: string };
+}
+
+function apiKey(): string {
+  const key = env.anthropicApiKey();
+  if (!key) {
     throw new AiError('configuracao', 'cliente', 'ANTHROPIC_API_KEY não configurada.');
   }
-  client = new Anthropic({ apiKey });
-  return client;
+  return key;
 }
 
-/**
- * Extrai o JSON da resposta.
- *
- * Mesmo instruído a responder só com JSON, o modelo às vezes embrulha em
- * ```json ... ``` ou emenda uma frase antes. Recortar do primeiro `{` até o
- * último `}` cobre os dois casos sem depender de o modelo obedecer.
- */
-function extractJson(raw: string): unknown {
-  const withoutFence = raw.replace(/```(?:json)?/gi, '').trim();
-  const start = withoutFence.indexOf('{');
-  const end = withoutFence.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) {
-    throw new AiError('formato', 'parse', 'Resposta sem objeto JSON reconhecível.');
+function errorFromStatus(status: number, body: AnthropicResponse, task: string): AiError {
+  const message = body.error?.message ?? `HTTP ${status}`;
+  if (status === 401 || status === 403) {
+    return new AiError('configuracao', task, 'Chave de API recusada.');
   }
-  try {
-    return JSON.parse(withoutFence.slice(start, end + 1));
-  } catch {
-    throw new AiError('formato', 'parse', 'JSON inválido na resposta do modelo.');
+  if (status === 429 || status === 529) {
+    return new AiError('limite', task, 'Limite de uso atingido.');
   }
-}
-
-function textOf(message: Anthropic.Message): string {
-  return message.content
-    .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n');
+  if (status === 400) {
+    return new AiError('formato', task, `Requisição recusada: ${message}`);
+  }
+  return new AiError('rede', task, message);
 }
 
 async function callModel(task: AiTask<unknown>, correction?: string): Promise<string> {
-  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: task.prompt }];
+  const messages: { role: 'user' | 'assistant'; content: string }[] = [
+    { role: 'user', content: task.prompt },
+  ];
+
   if (correction) {
     messages.push({ role: 'assistant', content: correction.slice(0, 2000) });
     messages.push({
@@ -63,29 +64,55 @@ async function callModel(task: AiTask<unknown>, correction?: string): Promise<st
     });
   }
 
+  let response: Response;
   try {
-    const message = await getClient().messages.create({
-      model: env.anthropicModel(),
-      max_tokens: task.maxTokens,
-      // Temperatura baixa: aqui o objetivo é fidelidade ao que a pessoa
-      // escreveu, não criatividade. Criatividade, neste produto, é o nome
-      // bonito de inventar experiência.
-      temperature: 0.2,
-      system: task.system,
-      messages,
+    response = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey(),
+        'anthropic-version': API_VERSION,
+      },
+      body: JSON.stringify({
+        model: env.anthropicModel(),
+        max_tokens: task.maxTokens,
+        // Temperatura baixa: fidelidade ao que a pessoa escreveu, não
+        // criatividade. Criatividade aqui é o nome bonito de inventar
+        // experiência.
+        temperature: 0.2,
+        system: task.system,
+        messages,
+      }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    return textOf(message);
   } catch (error) {
     if (error instanceof AiError) throw error;
-    const status = (error as { status?: number }).status;
-    if (status === 401 || status === 403) {
-      throw new AiError('configuracao', task.name, 'Chave de API recusada.');
-    }
-    if (status === 429 || status === 529) {
-      throw new AiError('limite', task.name, 'Limite de uso atingido.');
-    }
-    throw new AiError('rede', task.name, (error as Error).message ?? 'Falha na chamada.');
+    const aborted = (error as Error).name === 'TimeoutError' || (error as Error).name === 'AbortError';
+    throw new AiError(
+      'rede',
+      task.name,
+      aborted ? `Sem resposta da Anthropic em ${TIMEOUT_MS / 1000}s.` : ((error as Error).message ?? 'Falha na chamada.')
+    );
   }
+
+  let body: AnthropicResponse;
+  try {
+    body = (await response.json()) as AnthropicResponse;
+  } catch {
+    throw new AiError('formato', task.name, `Resposta ilegível (HTTP ${response.status}).`);
+  }
+
+  if (!response.ok) throw errorFromStatus(response.status, body, task.name);
+
+  if (body.stop_reason === 'max_tokens') {
+    throw new AiError('formato', task.name, 'Resposta cortada por limite de tokens.');
+  }
+
+  return (body.content ?? [])
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text ?? '')
+    .join('\n')
+    .trim();
 }
 
 export const anthropicProvider: AiProvider = {
@@ -95,25 +122,20 @@ export const anthropicProvider: AiProvider = {
   async run<T>(task: AiTask<T>): Promise<T> {
     const first = await callModel(task as AiTask<unknown>);
 
-    const parsedFirst = task.schema.safeParse(safeExtract(first));
+    const parsedFirst = task.schema.safeParse(extractJson(first));
     if (parsedFirst.success) return parsedFirst.data;
 
     // Uma segunda tentativa, e só uma: o erro mais comum é o modelo enfeitar a
     // resposta, e mostrar o texto de volta resolve. Insistir além disso só
     // queima tempo do usuário que está esperando com a tela em carregamento.
     const second = await callModel(task as AiTask<unknown>, first);
-    const parsedSecond = task.schema.safeParse(safeExtract(second));
+    const parsedSecond = task.schema.safeParse(extractJson(second));
     if (parsedSecond.success) return parsedSecond.data;
 
-    throw new AiError('formato', task.name, parsedSecond.error.issues[0]?.message ?? 'Formato inesperado.');
+    throw new AiError(
+      'formato',
+      task.name,
+      parsedSecond.error.issues[0]?.message ?? 'Formato inesperado.'
+    );
   },
 };
-
-/** Extrai sem lançar, para o `safeParse` decidir se vale a segunda tentativa. */
-function safeExtract(raw: string): unknown {
-  try {
-    return extractJson(raw);
-  } catch {
-    return null;
-  }
-}

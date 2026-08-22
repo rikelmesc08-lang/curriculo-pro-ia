@@ -16,6 +16,15 @@ function now(): string {
   return new Date().toISOString();
 }
 
+/**
+ * Por quanto tempo o driver local guarda registro de chamada de IA.
+ *
+ * Trinta dias cobre com folga a maior janela configurável de cache
+ * (`AI_CACHE_MINUTES`, teto de 30 dias) e a janela diária do limite de uso.
+ * Registro mais velho que isso não é lido por consulta nenhuma.
+ */
+const LOCAL_AI_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
 export const localRepository: Repository = {
   async findUserById(id) {
     const user = await read((db) => db.users.find((candidate) => candidate.id === id));
@@ -37,6 +46,50 @@ export const localRepository: Repository = {
       db.users = db.users.filter((user) => user.id !== id);
       db.resumes = db.resumes.filter((resume) => resume.ownerId !== id);
       db.applications = db.applications.filter((application) => application.ownerId !== id);
+      // O cache guarda texto derivado do currículo da pessoa. "Apagar minha
+      // conta" precisa levar isto junto, senão a exclusão é parcial e a
+      // promessa da tela de configurações vira mentira.
+      db.aiCalls = db.aiCalls.filter((call) => call.ownerId !== id);
+      db.passwordResets = db.passwordResets.filter((reset) => reset.userId !== id);
+    });
+  },
+
+  async countAiCalls(ownerId, since) {
+    return read(
+      (db) => db.aiCalls.filter((call) => call.ownerId === ownerId && call.createdAt >= since).length
+    );
+  },
+
+  async findAiCall(ownerId, fingerprint, since) {
+    const found = await read((db) =>
+      db.aiCalls
+        .filter(
+          (call) =>
+            call.ownerId === ownerId && call.fingerprint === fingerprint && call.createdAt >= since
+        )
+        // O mais recente: se a janela cobre dois registros iguais, o que vale é
+        // o último, não o primeiro que aparecer no arquivo.
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+    );
+    return found ?? null;
+  },
+
+  async recordAiCall(ownerId, entry) {
+    await mutate((db) => {
+      db.aiCalls.push({
+        id: randomUUID(),
+        ownerId,
+        task: entry.task,
+        fingerprint: entry.fingerprint,
+        result: entry.result,
+        createdAt: now(),
+      });
+
+      // Poda no momento da escrita. Sem isto o db.json cresce para sempre com
+      // registros que nenhuma consulta alcança mais — e este arquivo é lido
+      // inteiro a cada operação.
+      const cutoff = new Date(Date.now() - LOCAL_AI_RETENTION_MS).toISOString();
+      db.aiCalls = db.aiCalls.filter((call) => call.createdAt >= cutoff);
     });
   },
 

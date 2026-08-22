@@ -21,7 +21,16 @@ import { TextField } from '@/components/ui/Field';
  * na resposta. Numa tela de login, isso é a diferença entre a pessoa entrar ou
  * ficar olhando um botão morto com internet ruim.
  */
-export function AuthForm({ mode, next }: { mode: 'entrar' | 'cadastrar'; next?: string }) {
+export function AuthForm({
+  mode,
+  next,
+  notice,
+}: {
+  mode: 'entrar' | 'cadastrar';
+  next?: string;
+  /** Aviso vindo da URL — hoje, a confirmação de senha redefinida. */
+  notice?: string;
+}) {
   const isSignUp = mode === 'cadastrar';
   const [state, formAction, pending] = useActionState(
     isSignUp ? signUpAction : signInAction,
@@ -39,14 +48,46 @@ export function AuthForm({ mode, next }: { mode: 'entrar' | 'cadastrar'; next?: 
           : 'Continue de onde você parou.'}
       </p>
 
+      {notice && state.status === 'idle' && (
+        <Alert tone="success" className="mt-5">
+          {notice}
+        </Alert>
+      )}
+
       {state.status === 'error' && state.message && (
         <Alert tone="danger" className="mt-5">
           {state.message}
+          {/*
+            A SAÍDA PRECISA VIR JUNTO DO ERRO. "Sua conta ainda não foi
+            confirmada" sem um caminho ao lado é a mesma armadilha de antes,
+            só que com o texto certo: a pessoa tem a senha correta, não
+            consegue entrar, e o único botão à vista continua sendo "Entrar".
+            Quem perdeu o e-mail não tem como adivinhar que existe reenvio.
+          */}
+          {state.code === 'email-nao-confirmado' && (
+            <p className="mt-2">
+              <Link href="/confirmar-email" className="font-semibold underline">
+                Reenviar o e-mail de confirmação
+              </Link>
+            </p>
+          )}
         </Alert>
       )}
       {state.status === 'success' && state.message && (
         <Alert tone="success" className="mt-5">
           {state.message}
+          {/*
+            Cadastro que precisa de confirmação também termina aqui, e a pessoa
+            fecha a aba achando que acabou. Se o e-mail não chegar, ela volta
+            sem lembrar que existe esta saída.
+          */}
+          {state.code === 'confirmacao-pendente' && (
+            <p className="mt-2">
+              <Link href="/confirmar-email" className="font-semibold underline">
+                Não recebeu? Reenviar o e-mail
+              </Link>
+            </p>
+          )}
         </Alert>
       )}
 
@@ -76,15 +117,29 @@ export function AuthForm({ mode, next }: { mode: 'entrar' | 'cadastrar'; next?: 
           placeholder="voce@email.com"
         />
 
-        <TextField
-          label="Senha"
-          name="password"
-          type="password"
-          autoComplete={isSignUp ? 'new-password' : 'current-password'}
-          required
-          error={state.fieldErrors?.password}
-          hint={isSignUp ? 'Pelo menos 8 caracteres.' : undefined}
-        />
+        <div>
+          <TextField
+            label="Senha"
+            name="password"
+            type="password"
+            autoComplete={isSignUp ? 'new-password' : 'current-password'}
+            required
+            error={state.fieldErrors?.password}
+            hint={isSignUp ? 'Pelo menos 8 caracteres.' : undefined}
+          />
+          {/*
+            Colado ao campo de senha, e não escondido no rodapé: quem procura
+            este link já está frustrado, e é o momento em que a pessoa
+            abandona o produto se não achar.
+          */}
+          {!isSignUp && (
+            <p className="mt-2 text-right">
+              <Link href="/esqueci-senha" className="text-sm text-brand-700 hover:underline">
+                Esqueci minha senha
+              </Link>
+            </p>
+          )}
+        </div>
 
         <Button type="submit" block size="lg" loading={pending} loadingLabel={isSignUp ? 'Criando conta...' : 'Entrando...'}>
           {isSignUp ? 'Criar conta' : 'Entrar'}

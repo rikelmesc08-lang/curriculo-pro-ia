@@ -28,6 +28,12 @@ export const NAV_ITEMS: NavItem[] = [
     description: 'Crie e edite seu currículo etapa por etapa.',
   },
   {
+    href: '/app/analise',
+    label: 'Analisar currículo',
+    icon: 'olho',
+    description: 'Nota, problemas encontrados e a versão otimizada do seu texto.',
+  },
+  {
     href: '/app/analisar-vaga',
     label: 'Analisar vaga',
     icon: 'alvo',
@@ -73,7 +79,7 @@ export const NAV_ITEMS: NavItem[] = [
 
 /** Atalhos exibidos como cards no painel. Subconjunto do menu. */
 export const DASHBOARD_SHORTCUTS = NAV_ITEMS.filter((item) =>
-  ['/app/curriculo', '/app/analisar-vaga', '/app/otimizar', '/app/carta', '/app/entrevista'].includes(
+  ['/app/curriculo', '/app/analise', '/app/analisar-vaga', '/app/otimizar', '/app/carta'].includes(
     item.href
   )
 );

@@ -35,7 +35,17 @@ export interface ResumeHeader {
   contactLines: string[];
 }
 
+/**
+ * Rótulo do status da formação, ou VAZIO quando não informado.
+ *
+ * O vazio precisa sair vazio daqui. `EDUCATION_STATUS` tem uma entrada com
+ * `id: ''` e rótulo "Não informado", que existe para o SELETOR do formulário —
+ * ali a pessoa precisa ver a opção neutra. No currículo, não: escrever "Não
+ * informado" ao lado do curso é pior que não escrever nada, e quem chama esta
+ * função filtra por `Boolean` contando com a string vazia.
+ */
 function statusLabel(status: string): string {
+  if (!status) return '';
   return EDUCATION_STATUS.find((item) => item.id === status)?.label ?? status;
 }
 

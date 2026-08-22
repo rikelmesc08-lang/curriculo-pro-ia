@@ -2,7 +2,7 @@ import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import { mutate, read, type StoredUser } from '@/lib/db/local/store';
-import { hashPassword, verifyPassword } from './password';
+import { hashPassword, precisaRehash, verifyPassword } from './password';
 import { normalizeEmail } from './validation';
 
 /**
@@ -56,6 +56,23 @@ export async function authenticateLocalUser(input: {
   const valid = await verifyPassword(input.password, hash);
 
   if (!user || !valid) return { ok: false, reason: 'credenciais-invalidas' };
+
+  // MIGRAÇÃO DE CUSTO. O login é a única janela em que a senha em texto
+  // existe, e portanto a única em que dá para regravar o hash com os
+  // parâmetros novos. Sem isto, endurecer o scrypt só protegeria contas
+  // criadas depois da mudança — as antigas ficariam no custo velho para
+  // sempre, sem nada indicando isso.
+  //
+  // A falha aqui não pode derrubar um login legítimo: se a regravação der
+  // errado, a pessoa entra com o hash antigo e tentamos de novo na próxima.
+  if (precisaRehash(user.passwordHash)) {
+    try {
+      await changeLocalPassword(user.id, input.password);
+    } catch (error) {
+      console.error('[authenticateLocalUser] falha ao migrar o hash', error);
+    }
+  }
+
   return { ok: true, user };
 }
 

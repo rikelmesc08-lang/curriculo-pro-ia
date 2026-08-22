@@ -17,9 +17,11 @@ export default async function SignUpPage({ searchParams }: PageProps<'/cadastro'
   // A landing manda `?destino=analisar` no CTA secundário. Traduzimos aqui para
   // que a pessoa caia direto na ferramenta que ela clicou, e não no painel.
   const destino = typeof params.destino === 'string' ? params.destino : undefined;
+  // Mesmo destino do CTA da landing: quem clicou em "analisar meu currículo"
+  // quer o diagnóstico do próprio currículo, não a leitura de um anúncio.
   const next =
     destino === 'analisar'
-      ? '/app/analisar-vaga'
+      ? '/app/analise'
       : typeof params.proximo === 'string'
         ? params.proximo
         : undefined;

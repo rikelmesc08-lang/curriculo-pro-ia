@@ -21,6 +21,17 @@ export function AiModeBadge({ mode }: { mode: AiMode }) {
   return <Badge tone="info">Gerado com IA</Badge>;
 }
 
+/**
+ * Diz que o resultado veio guardado, não de uma chamada nova.
+ *
+ * Sem este aviso, clicar de novo e receber exatamente o mesmo texto parece
+ * defeito. Com ele, fica claro que a resposta não mudou porque a pergunta não
+ * mudou — e que isso poupou uma chamada de IA.
+ */
+export function CachedBadge() {
+  return <Badge tone="neutral">Resultado já calculado — sem nova chamada</Badge>;
+}
+
 export function IntegrityNote({ className }: { className?: string }) {
   return (
     <p className={className ?? 'text-xs leading-relaxed text-muted'}>
