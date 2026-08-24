@@ -1,4 +1,5 @@
 import type { ZodType } from 'zod';
+import type { TipoAceito } from '@/lib/files/sniff';
 import type { AiMode } from '@/types/ai';
 
 /**
@@ -16,11 +17,42 @@ import type { AiMode } from '@/types/ai';
  * Em nenhum momento uma resposta pré-programada é apresentada como se fosse a
  * IA real — ver `AiEnvelope.mode` e o componente `AiModeBadge`.
  */
+/**
+ * Arquivo enviado junto do prompt.
+ *
+ * EXISTE POR UM MOTIVO SÓ: importar o currículo que a pessoa já tem — em PDF, em
+ * PDF escaneado ou em FOTO. A foto não é luxo: boa parte de quem procura
+ * emprego tem o currículo impresso e só o celular à mão.
+ *
+ * O conteúdo vai em base64 porque é assim que as duas APIs aceitam arquivo
+ * embutido na requisição. Quem valida tamanho e tipo é a Server Action, antes
+ * de chegar aqui — esta camada assume que o que recebeu já passou por isso.
+ */
+export interface AiAttachment {
+  /**
+   * O tipo REAL do arquivo, detectado pelos bytes — nunca o que o navegador
+   * declarou. Ver `src/lib/files/sniff.ts`.
+   */
+  mimeType: TipoAceito;
+  /** Conteúdo do arquivo, em base64, sem o prefixo `data:`. */
+  dataBase64: string;
+}
+
 export interface AiTask<T> {
   /** Nome curto, usado em log e mensagem de erro. */
   name: string;
   system: string;
   prompt: string;
+  /**
+   * Arquivo que o modelo deve ler para responder.
+   *
+   * PROVEDOR QUE NÃO SUPORTA ANEXO TEM QUE FALHAR, NUNCA IGNORAR. Se o arquivo
+   * sumisse no caminho, o modelo receberia "extraia os dados do PDF anexo" sem
+   * PDF nenhum — e responderia inventando um currículo inteiro. Num produto que
+   * promete não inventar nada sobre a vida de quem usa, esse é o pior desfecho
+   * possível: falha silenciosa que produz dado falso com aparência de verdade.
+   */
+  attachment?: AiAttachment;
   /** Valida a saída do modelo. Texto que não passa aqui não chega à UI. */
   schema: ZodType<T>;
   maxTokens: number;

@@ -74,6 +74,14 @@ function outputBudget(maxTokens: number): number {
 
 interface GeminiPart {
   text?: string;
+  /**
+   * Arquivo embutido na própria requisição.
+   *
+   * O Gemini lê PDF nativamente — não há biblioteca de parsing neste projeto e
+   * não precisa haver. `snake_case` é o nome que a API usa; não é deslize de
+   * estilo.
+   */
+  inline_data?: { mime_type: string; data: string };
 }
 
 interface GeminiResponse {
@@ -195,8 +203,24 @@ async function callModel(
     );
   }
 
+  /**
+   * O ARQUIVO VEM ANTES DO TEXTO, e a ordem importa: o prompt manda extrair do
+   * documento acima. Invertido, a instrução chega antes do que ela referencia.
+   */
+  const primeiraFala: GeminiPart[] = task.attachment
+    ? [
+        {
+          inline_data: {
+            mime_type: task.attachment.mimeType,
+            data: task.attachment.dataBase64,
+          },
+        },
+        { text: task.prompt },
+      ]
+    : [{ text: task.prompt }];
+
   const contents: { role: 'user' | 'model'; parts: GeminiPart[] }[] = [
-    { role: 'user', parts: [{ text: task.prompt }] },
+    { role: 'user', parts: primeiraFala },
   ];
 
   if (correction) {

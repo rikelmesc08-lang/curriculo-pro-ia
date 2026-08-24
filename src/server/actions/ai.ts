@@ -1,13 +1,21 @@
 'use server';
 
+import { createHash } from 'node:crypto';
+
 import { requireUser } from '@/lib/auth/session';
 import { getRepository } from '@/lib/db';
 import { env } from '@/lib/env';
 import { fail, ok, type AiActionResult } from '@/lib/forms/action-result';
 import { parseResumeContent } from '@/lib/resume/schema';
+import { detectarTipo, ehImagem } from '@/lib/files/sniff';
 import { capInput, runWithBudget } from '@/server/ai-budget';
 import { aiErrorMessage } from '@/services/ai';
 import { toDelivery } from '@/services/ai/review-gate';
+import {
+  importResumeFromFile,
+  importResumeFromText,
+  type ResumeImport,
+} from '@/services/ai/resume-import';
 import {
   analyzeAts,
   analyzeJobDescription,
@@ -49,6 +57,25 @@ import type { Resume } from '@/types/resume';
  */
 
 const MAX_JOB_LENGTH = 20000;
+
+/**
+ * Tetos por tipo de arquivo.
+ *
+ * FOTO TEM TETO MAIOR PORQUE FOTO É MAIOR: um PDF de currículo raramente passa
+ * de 1 MB, enquanto uma foto de celular de 12 MP sai com 3 a 6 MB sem esforço.
+ * Um limite único obrigaria a escolher entre recusar metade das fotos ou abrir
+ * demais para PDF.
+ *
+ * O limite do Next para Server Action está acima dos dois (`next.config.ts`) de
+ * propósito: a recusa precisa acontecer AQUI, com mensagem escrita para gente,
+ * em vez de a plataforma cortar a requisição e o usuário ver um erro de rede
+ * sem causa aparente.
+ */
+const MAX_PDF_BYTES = 4 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/** Quanto texto colado de currículo aceitamos antes do corte. */
+const MAX_RESUME_TEXT = 20000;
 
 /**
  * O currículo sem os campos que mudam a cada requisição.
@@ -293,4 +320,94 @@ export async function resumeReviewAction(
     console.error('[ai-action]', error);
     return fail(aiErrorMessage(error));
   }
+}
+
+/**
+ * Importa o currículo a partir do arquivo que a pessoa já tem.
+ *
+ * Aceita PDF, PDF escaneado e FOTO — quem tem o currículo impresso e só o
+ * celular à mão fotografa, e isso precisa funcionar.
+ *
+ * Recebe `FormData` e não base64: o arquivo atravessa a rede no tamanho
+ * original. Convertido no cliente, chegaria 33% maior — e uma foto de 6 MB
+ * estouraria o limite da plataforma por causa da codificação, não do conteúdo.
+ */
+export async function importResumeFromFileAction(
+  formData: FormData
+): Promise<AiActionResult<ResumeImport>> {
+  const user = await requireUser('/app/curriculo/importar');
+
+  const arquivo = formData.get('arquivo');
+  if (!(arquivo instanceof File) || arquivo.size === 0) {
+    return fail('Escolha o arquivo do seu currículo — pode ser um PDF ou uma foto.');
+  }
+
+  const bytes = new Uint8Array(await arquivo.arrayBuffer());
+
+  /**
+   * O TIPO VEM DOS BYTES, NUNCA DE `arquivo.type`.
+   *
+   * Aquele campo é declarado por quem envia. Além da questão de confiança, ele
+   * erra sozinho no caso mais comum aqui: navegador de Android costuma mandar
+   * `application/octet-stream` para foto vinda da galeria, e recusar por ele
+   * bloquearia um arquivo perfeitamente legível.
+   */
+  const tipo = detectarTipo(bytes);
+  if (!tipo) {
+    return fail(
+      'Não reconhecemos esse arquivo. Envie o currículo em PDF ou uma foto dele (JPG, PNG ou HEIC) — ou cole o texto, que também funciona.'
+    );
+  }
+
+  const teto = ehImagem(tipo) ? MAX_IMAGE_BYTES : MAX_PDF_BYTES;
+  if (arquivo.size > teto) {
+    const mb = (arquivo.size / 1024 / 1024).toFixed(1);
+    const limite = (teto / 1024 / 1024).toFixed(0);
+    return fail(
+      ehImagem(tipo)
+        ? `Sua foto tem ${mb} MB e o limite é ${limite} MB. Tire de novo com resolução menor, ou cole o texto do currículo.`
+        : `Seu arquivo tem ${mb} MB e o limite é ${limite} MB. Salve o PDF em qualidade menor, ou cole o texto do currículo.`
+    );
+  }
+
+  const conteudo = Buffer.from(bytes);
+
+  /**
+   * O HASH DO ARQUIVO É O QUE IDENTIFICA A PERGUNTA NO CACHE.
+   *
+   * Sem ele na conta, dois arquivos diferentes do mesmo usuário gerariam a
+   * mesma chave, e a segunda importação devolveria o currículo da primeira —
+   * sem erro nenhum na tela. É hash, e não o arquivo: o registro de uso não
+   * precisa guardar mais uma cópia do currículo de ninguém.
+   */
+  const sha256 = createHash('sha256').update(conteudo).digest('hex');
+
+  return guard(() =>
+    runWithBudget(
+      user.id,
+      'importResume',
+      { tipo, sha256, bytes: conteudo.byteLength },
+      () => importResumeFromFile({ mimeType: tipo, dataBase64: conteudo.toString('base64') })
+    )
+  );
+}
+
+/** Importa a partir do texto colado — para quem não tem o currículo em PDF. */
+export async function importResumeFromTextAction(
+  text: unknown
+): Promise<AiActionResult<ResumeImport>> {
+  const user = await requireUser('/app/curriculo/importar');
+  const conteudo = capInput(text, MAX_RESUME_TEXT).trim();
+
+  if (conteudo.length < 100) {
+    return fail(
+      'Cole o texto do seu currículo inteiro para a gente conseguir ler. O que veio é curto demais para ser um currículo.'
+    );
+  }
+
+  return guard(() =>
+    runWithBudget(user.id, 'importResumeText', { tipo: 'texto', conteudo }, () =>
+      importResumeFromText(conteudo)
+    )
+  );
 }

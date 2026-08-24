@@ -58,19 +58,34 @@ export default async function DashboardPage() {
         <p className="mt-1 text-sm text-muted">
           {content
             ? 'Seu currículo está salvo. Continue de onde parou ou adapte-o para uma vaga.'
-            : 'Vamos montar seu currículo? Leva alguns minutos e fica salvo automaticamente.'}
+            : 'Vamos começar pelo seu currículo? Envie o que você já tem, ou monte aqui — tudo fica salvo automaticamente.'}
         </p>
       </header>
 
+      {/*
+        A MESMA ORDEM DAS FERRAMENTAS DE IA, e pelo mesmo motivo — ver
+        `NoResumeNotice`, em `components/tools/ToolPieces.tsx`: quem chega aqui
+        quase sempre JÁ TEM um currículo, e foi por causa dele que veio. Criar
+        do zero é o caso de quem não tem nenhum, que é a minoria.
+
+        Este aviso é a primeira coisa que a pessoa lê depois de entrar. Enquanto
+        oferecia só o formulário guiado, ele era a porta mais alta do produto:
+        para descobrir o que estava errado no próprio currículo, era preciso
+        redigitá-lo inteiro antes.
+      */}
       {!content && (
         <Alert tone="info" title="Você ainda não tem currículo aqui">
           <p>
-            Comece pelo formulário guiado. Você escreve do seu jeito e a IA melhora a redação
-            depois — sem inventar nada que você não tenha vivido.
+            Se você já tem um pronto, envie o arquivo — a IA preenche tudo para você conferir, sem
+            redigitar. Se ainda não tem, o formulário guiado monta o seu passo a passo: você escreve
+            do seu jeito e a IA melhora a redação depois, sem inventar nada que você não tenha vivido.
           </p>
-          <div className="mt-3">
-            <ButtonLink href="/app/curriculo" size="sm" className="uppercase tracking-wide">
-              Criar meu currículo
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <ButtonLink href="/app/curriculo/importar" size="sm" className="uppercase tracking-wide">
+              Enviar meu currículo pronto
+            </ButtonLink>
+            <ButtonLink href="/app/curriculo" size="sm" variant="secondary">
+              Não tenho um. Criar do zero
             </ButtonLink>
           </div>
         </Alert>

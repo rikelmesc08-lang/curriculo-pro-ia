@@ -80,6 +80,24 @@ const nextConfig: NextConfig = {
    */
   output: process.env.BUILD_STANDALONE === '1' ? 'standalone' : undefined,
 
+  /**
+   * Teto do corpo de uma Server Action.
+   *
+   * Existe pela importação de currículo: o padrão do Next é 1 MB, e uma FOTO de
+   * celular passa disso sem esforço.
+   *
+   * O NÚMERO AQUI É MAIOR QUE OS LIMITES DE VERDADE — 4 MB para PDF e 8 MB para
+   * foto, conferidos em `src/server/actions/ai.ts`. A folga é deliberada: quem recusa precisa ser a
+   * nossa validação, que explica o que fazer ("salve em qualidade menor, ou
+   * cole o texto"), e não a plataforma cortando a requisição e deixando o
+   * usuário com um erro de rede sem causa aparente.
+   */
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '10mb',
+    },
+  },
+
   async headers() {
     const producao = process.env.NODE_ENV === 'production';
     return [

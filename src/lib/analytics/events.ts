@@ -19,6 +19,7 @@ export type AnalyticsEventName =
   | 'job_analysis_completed'
   | 'ats_analysis'
   | 'resume_review'
+  | 'resume_import'
   | 'cover_letter_generated'
   | 'interview_prep'
   | 'pdf_download'
@@ -43,6 +44,14 @@ export interface AnalyticsProperties {
   // `acesso` mede quantas análises param na prévia — é o número que diz se o
   // corte entre gratuito e pago está no lugar certo. Nenhum conteúdo junto.
   resume_review: { modo: 'real' | 'demo'; pontuacao: number; acesso: 'completo' | 'previa' };
+  /**
+   * Por qual porta a pessoa trouxe o currículo que já tinha.
+   *
+   * É a métrica que diz se valeu manter as duas: se ninguém colar texto, a aba
+   * some; se muita gente colar, o upload está falhando em algum formato comum e
+   * precisamos descobrir qual. Só o modo — nada do conteúdo.
+   */
+  resume_import: { modo: 'arquivo' | 'texto' };
   cover_letter_generated: { modo: 'real' | 'demo' };
   interview_prep: { modo: 'real' | 'demo'; perguntas: number };
   pdf_download: { modelo: string };
