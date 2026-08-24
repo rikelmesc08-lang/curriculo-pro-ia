@@ -5,31 +5,27 @@ import { track } from '@/lib/analytics/track';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Feedback';
 import { Icon } from '@/components/ui/Icon';
+import type { ReviewIssue } from '@/types/ai';
 import type { ResumeContent } from '@/types/resume';
 
 /**
- * Botão "Baixar PDF".
+ * Baixa o currículo ATUAL com os problemas marcados em cima dele.
  *
- * Faz POST do currículo que está na tela e recebe os bytes. O download é
- * disparado por um `<a download>` criado na hora, e o object URL é revogado
- * em seguida — sem isso, cada clique deixaria o arquivo inteiro preso na
- * memória da aba até ela ser fechada.
+ * Irmão do `DownloadPdfButton`, e separado dele de propósito: os dois pedem
+ * arquivos diferentes, de rotas diferentes, e um deles não pode ser enviado
+ * para vaga nenhuma. Um componente só, decidindo por uma flag, acabaria com
+ * alguém passando a flag errada.
  */
-export function DownloadPdfButton({
+export function DownloadDiagnosticButton({
   resume,
-  disabled,
-  disabledReason,
-  block,
-  label = 'Baixar PDF',
-  variant,
+  issues,
+  score,
+  potentialScore,
 }: {
   resume: ResumeContent;
-  disabled?: boolean;
-  disabledReason?: string;
-  block?: boolean;
-  /** Rótulo do botão. Quando há mais de um PDF na tela, "Baixar PDF" não basta. */
-  label?: string;
-  variant?: 'primary' | 'secondary';
+  issues: ReviewIssue[];
+  score: number;
+  potentialScore: number;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,15 +35,15 @@ export function DownloadPdfButton({
     setError(null);
 
     try {
-      const response = await fetch('/api/curriculo/pdf', {
+      const response = await fetch('/api/curriculo/diagnostico', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(resume),
+        body: JSON.stringify({ resume, issues, score, potentialScore }),
       });
 
       if (!response.ok) {
         const detail = (await response.json().catch(() => null)) as { erro?: string } | null;
-        setError(detail?.erro ?? 'Não conseguimos gerar o PDF agora.');
+        setError(detail?.erro ?? 'Não conseguimos gerar o PDF do diagnóstico agora.');
         return;
       }
 
@@ -55,13 +51,13 @@ export function DownloadPdfButton({
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = disposition(response) ?? 'curriculo.pdf';
+      anchor.download = disposition(response) ?? 'curriculo-diagnostico.pdf';
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
 
-      track('pdf_download', { modelo: resume.template });
+      track('pdf_download', { modelo: 'diagnostico' });
     } catch {
       setError('Falha de conexão ao gerar o PDF. Verifique sua internet e tente de novo.');
     } finally {
@@ -70,24 +66,18 @@ export function DownloadPdfButton({
   }
 
   return (
-    <div className={block ? 'w-full' : undefined}>
+    <div>
       <Button
         type="button"
+        variant="secondary"
         onClick={download}
         loading={pending}
-        loadingLabel="Gerando PDF..."
-        disabled={disabled}
-        block={block}
-        variant={variant}
+        loadingLabel="Marcando seu currículo..."
         size="lg"
       >
-        <Icon name="download" className="h-4 w-4" />
-        {label}
+        <Icon name="olho" className="h-4 w-4" />
+        Baixar currículo marcado
       </Button>
-
-      {disabled && disabledReason && (
-        <p className="mt-2 text-xs text-muted">{disabledReason}</p>
-      )}
 
       {error && (
         <Alert tone="danger" className="mt-3">
@@ -98,7 +88,6 @@ export function DownloadPdfButton({
   );
 }
 
-/** Lê o nome do arquivo que o servidor escolheu. */
 function disposition(response: Response): string | null {
   const header = response.headers.get('Content-Disposition');
   if (!header) return null;

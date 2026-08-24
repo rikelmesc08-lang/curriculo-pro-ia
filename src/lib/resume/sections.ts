@@ -21,6 +21,18 @@ export interface ResumeEntry {
   meta: string;
   description?: string;
   bullets: string[];
+  /**
+   * `id` do item de origem no currículo — a experiência, a formação, o curso.
+   *
+   * Existe para a MARCAÇÃO do PDF de diagnóstico saber em qual entrada pousar.
+   * Sem isso, ligar "o problema está na experiência da Loja X" à linha certa
+   * dependeria de comparar títulos por texto, e duas experiências com o mesmo
+   * cargo em empresas diferentes marcariam a errada.
+   *
+   * Os renderizadores de currículo IGNORAM este campo: ele não é conteúdo, é
+   * endereço.
+   */
+  sourceId?: string;
 }
 
 export type ResumeSection =
@@ -95,6 +107,7 @@ export function buildSections(resume: ResumeContent): ResumeSection[] {
           title: 'Experiência profissional',
           kind: 'entries',
           entries: resume.experiences.map((experience) => ({
+            sourceId: experience.id,
             title: experience.role,
             subtitle: experience.company,
             meta: periodLabel(experience.startDate, experience.endDate, experience.current),
@@ -111,6 +124,7 @@ export function buildSections(resume: ResumeContent): ResumeSection[] {
           title: 'Formação acadêmica',
           kind: 'entries',
           entries: resume.education.map((item) => ({
+            sourceId: item.id,
             title: item.course,
             subtitle: item.institution,
             meta: [periodLabel(item.startDate, item.endDate, false), statusLabel(item.status)]
@@ -129,6 +143,7 @@ export function buildSections(resume: ResumeContent): ResumeSection[] {
           title: 'Projetos',
           kind: 'entries',
           entries: resume.projects.map((project) => ({
+            sourceId: project.id,
             title: project.name,
             subtitle: project.context,
             meta: project.link,
@@ -145,6 +160,7 @@ export function buildSections(resume: ResumeContent): ResumeSection[] {
           title: 'Atividades e voluntariado',
           kind: 'entries',
           entries: resume.activities.map((activity) => ({
+            sourceId: activity.id,
             title: activity.name,
             subtitle: activity.organization,
             meta: activity.period,
@@ -168,6 +184,7 @@ export function buildSections(resume: ResumeContent): ResumeSection[] {
       title: 'Cursos e certificações',
       kind: 'entries',
       entries: resume.certifications.map((item) => ({
+        sourceId: item.id,
         title: item.name,
         subtitle: item.institution,
         meta: item.year,

@@ -190,6 +190,28 @@ export interface ReviewDimension {
   comment: string;
 }
 
+/**
+ * Endereço do problema dentro do currículo, para o PDF de diagnóstico saber
+ * onde desenhar a marca.
+ *
+ * É SEPARADO DE `where` de propósito. `where` é para a pessoa ler ("Experiência
+ * na Loja Estilo Novo"); isto é para o código encontrar. Misturar os dois
+ * significaria procurar a linha certa comparando texto livre, e duas
+ * experiências com o mesmo cargo em empresas diferentes marcariam a errada.
+ *
+ * TUDO AQUI É OPCIONAL E DESCARTÁVEL. O modelo erra o id, inventa uma seção que
+ * não existe, ou simplesmente não responde este campo — e nesses casos o
+ * problema continua aparecendo na lista, só não ganha marca no corpo do
+ * documento. Marca no lugar errado é pior que marca nenhuma: ela manda a pessoa
+ * corrigir um trecho que não tem defeito.
+ */
+export interface ReviewIssueAnchor {
+  /** `id` de uma seção de `buildSections`: "resumo", "experiencia", "formacao"... */
+  section: string;
+  /** `id` do item dentro da seção, quando o problema é de um item só. */
+  entryId?: string;
+}
+
 /** Um problema concreto encontrado, com onde está e como resolver. */
 export interface ReviewIssue {
   /** Onde está, em linguagem de usuário: "Resumo profissional", "Experiência na Loja X". */
@@ -198,6 +220,8 @@ export interface ReviewIssue {
   /** O que fazer. Nunca "invente um número" nem "diga que você tem". */
   fix: string;
   severity: 'alta' | 'media' | 'baixa';
+  /** Endereço para a marcação no PDF. Ausente quando não deu para localizar. */
+  anchor?: ReviewIssueAnchor;
 }
 
 /**

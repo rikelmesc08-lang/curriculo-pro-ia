@@ -18,6 +18,7 @@ import { AiResultPanel } from '@/components/ai/AiResultPanel';
 import { IntegrityNote } from '@/components/ai/AiNotices';
 import { ResumeSheet } from '@/components/resume/ResumeSheet';
 import { DownloadPdfButton } from '@/components/resume/DownloadPdfButton';
+import { DownloadDiagnosticButton } from '@/components/resume/DownloadDiagnosticButton';
 import { ChipList, JobDescriptionInput } from './ToolPieces';
 
 /**
@@ -462,11 +463,54 @@ function FullResult({
         </Alert>
       )}
 
+      {/*
+        OS DOIS DOCUMENTOS, LADO A LADO E COM A DIFERENÇA ESCRITA.
+
+        Eles saem da mesma tela, no mesmo minuto, e vão para a mesma pasta de
+        downloads. Sem dizer aqui, em texto, qual é qual, alguém vai anexar o
+        marcado numa candidatura — e entregar ao recrutador um documento cheio
+        de marcas vermelhas apontando os defeitos do próprio currículo.
+
+        O marcado usa `base` (o currículo COMO ESTÁ) e o limpo usa `preview` (o
+        currículo com a proposta aplicada). Trocar os dois entregaria a versão
+        melhorada cheia de marcas e a versão com defeito como se fosse a boa.
+      */}
+      <Block title="Leve o diagnóstico com você">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="rounded-card border border-line bg-canvas p-4">
+            <p className="text-sm font-semibold text-ink">Currículo marcado</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              O seu currículo de hoje, com cada problema desenhado em cima do trecho onde ele está,
+              numerado e explicado no fim. É material de trabalho —{' '}
+              <strong className="font-semibold text-ink">não envie para vagas</strong>.
+            </p>
+            <div className="mt-3">
+              <DownloadDiagnosticButton
+                resume={base}
+                issues={review.issues}
+                score={review.score}
+                potentialScore={review.potentialScore}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-card border border-brand-200 bg-brand-50/40 p-4">
+            <p className="text-sm font-semibold text-ink">Currículo melhorado</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              A versão reescrita, limpa e pronta para enviar. O texto é o seu, melhor escrito — nenhum
+              resultado, número ou experiência foi acrescentado.
+            </p>
+            <div className="mt-3">
+              <DownloadPdfButton resume={preview} label="Baixar currículo melhorado" />
+            </div>
+          </div>
+        </div>
+      </Block>
+
       <div className="flex flex-wrap gap-3">
         <Button type="button" onClick={apply} loading={applying} loadingLabel="Aplicando...">
           Aplicar no meu currículo
         </Button>
-        <DownloadPdfButton resume={preview} />
         <Button type="button" variant="ghost" onClick={onReanalyze}>
           Analisar de novo
         </Button>
