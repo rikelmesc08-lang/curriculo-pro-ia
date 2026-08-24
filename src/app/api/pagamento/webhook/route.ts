@@ -133,8 +133,45 @@ export async function POST(request: Request) {
      * pelo nosso servidor — mas conferir na volta custa uma comparação e fecha
      * a classe inteira de ataque em que alguém paga um centavo por um produto
      * de R$ 27,90. Nunca confie na volta só porque você controlou a ida.
+     *
+     * FAIL-CLOSED, não fail-open: se `amountCents` veio `null` — a API do
+     * provedor não trouxe `transaction_amount`, ou trouxe algo que não é
+     * número —, a checagem NÃO é pulada. Pular liberaria o plano sem
+     * conferir valor nenhum bem no momento em que falta a informação para
+     * conferir, o que é o oposto de uma trava.
+     *
+     * A MESMA LÓGICA VALE PARA A MOEDA. `amountCents` é só um número — ele não
+     * diz em que moeda foi cobrado. Uma resposta que trouxesse `27.9` numa
+     * moeda que não é a nossa bateria a comparação de centavos e ainda assim
+     * entregaria uma fração do valor de verdade: o mesmo golpe do centavo que
+     * esta checagem existe para impedir, só que pela moeda em vez da
+     * quantia. Por isso a moeda ausente OU diferente da moeda do nosso
+     * registro (`pagamento.currency`) recebe o mesmo tratamento do valor
+     * ilegível.
+     *
+     * A resposta para os dois casos é 500, não 200 com `ignorado`. A
+     * diferença é a mesma que já vale para o `catch` no fim desta rota e
+     * para o 404 que responde 500 (ver docs/pagamento-mercado-pago.md): 200
+     * faz o provedor parar de reenviar essa notificação para sempre, e se o
+     * campo sumiu ou veio inconsistente por um problema do lado deles — não
+     * por fraude —, a compra de quem pagou de verdade fica pendente e nunca
+     * mais recebe outro evento que a corrija. 500 pede reenvio; o custo é
+     * uma notificação inútil se o campo de fato nunca vier, o que é barato
+     * perto de fazer o dinheiro de quem pagou sumir.
      */
-    if (snapshot.status === 'pago' && snapshot.amountCents !== null) {
+    if (snapshot.status === 'pago') {
+      if (snapshot.amountCents === null) {
+        console.error(
+          `[webhook] valor ilegível em ${dataId}: status pago, mas transaction_amount não veio ou não é numérico`
+        );
+        return NextResponse.json({ erro: 'valor do pagamento ilegível' }, { status: 500 });
+      }
+      if (snapshot.currency === null || snapshot.currency !== pagamento.currency) {
+        console.error(
+          `[webhook] moeda divergente em ${dataId}: provedor informou ${snapshot.currency ?? 'nenhuma'}, esperado ${pagamento.currency}`
+        );
+        return NextResponse.json({ erro: 'moeda do pagamento divergente' }, { status: 500 });
+      }
       if (snapshot.amountCents < pagamento.amountCents) {
         console.error(
           `[webhook] valor insuficiente em ${dataId}: pago ${snapshot.amountCents}, esperado ${pagamento.amountCents}`

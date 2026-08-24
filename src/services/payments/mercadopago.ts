@@ -163,6 +163,9 @@ export const mercadoPagoProvider: PaymentProvider = {
       // De volta para centavos inteiros, com arredondamento explícito: o valor
       // chega como decimal e 27.9 * 100 dá 2789.9999... em ponto flutuante.
       amountCents: typeof valor === 'number' ? Math.round(valor * 100) : null,
+      // Mesmo cuidado de tipo do valor: só string vira moeda, o resto vira
+      // `null` e cai no fail-closed do webhook, junto com o valor ilegível.
+      currency: texto(resposta, 'currency_id'),
     };
   },
 };

@@ -64,6 +64,17 @@ export interface PaymentSnapshot {
   /** O `paymentId` que mandamos na criação. Amarra o pagamento à nossa linha. */
   ourReference: string | null;
   amountCents: number | null;
+  /**
+   * Código ISO da moeda em que o valor acima foi cobrado (ex.: `"BRL"`).
+   *
+   * `amountCents` sozinho não diz em que moeda ele está. Uma resposta que
+   * traga o número certo numa moeda errada bate a comparação de centavos e
+   * ainda assim entrega uma fração do valor de verdade — o mesmo golpe do
+   * centavo que a checagem de valor existe para impedir, só que pela moeda.
+   * `null` quando a resposta não trouxe `currency_id` ou trouxe algo que não
+   * é string.
+   */
+  currency: string | null;
 }
 
 export interface PaymentProvider {
