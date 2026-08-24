@@ -214,13 +214,33 @@ const PLAN_FEATURES = [
   'Download em PDF',
 ];
 
-export function Pricing({ isAuthenticated }: { isAuthenticated: boolean }) {
+/**
+ * Cartão de preço da landing.
+ *
+ * `checkoutDisponivel` CHEGA PRONTO DO SERVIDOR, calculado uma vez em
+ * `page.tsx` a partir da credencial do Mercado Pago. Este componente não lê
+ * variável de ambiente nem decide nada sozinho — só mostra o que recebeu. Isso
+ * evita que o selo "Em breve" fique fixo no código depois que a cobrança for
+ * ligada de verdade, e evita também o erro oposto: mostrar "Disponível" numa
+ * instância sem credencial configurada.
+ */
+export function Pricing({
+  isAuthenticated,
+  checkoutDisponivel,
+}: {
+  isAuthenticated: boolean;
+  checkoutDisponivel: boolean;
+}) {
   return (
     <SectionShell
       id="planos"
       eyebrow="Planos"
       title="Um plano só, sem pegadinha"
-      description="O produto está em fase inicial e o acesso é gratuito enquanto validamos o que funciona melhor para quem está procurando emprego."
+      description={
+        checkoutDisponivel
+          ? 'Crie e importe seu currículo sem custo. Quando quiser o diagnóstico completo e o currículo pronto para enviar, é um pagamento único, sem assinatura.'
+          : 'O produto está em fase inicial e o acesso é gratuito enquanto validamos o que funciona melhor para quem está procurando emprego.'
+      }
       tone="surface"
     >
       <div className="grid items-start gap-5 lg:grid-cols-[1fr_1fr]">
@@ -230,7 +250,9 @@ export function Pricing({ isAuthenticated }: { isAuthenticated: boolean }) {
             <Badge tone="success">Disponível agora</Badge>
           </div>
           <p className="mt-2 text-sm text-muted">
-            Crie sua conta e use todas as ferramentas. Nenhum cartão é pedido.
+            {checkoutDisponivel
+              ? 'Crie sua conta, monte seu currículo e veja a prévia da análise. Nenhum cartão é pedido para começar.'
+              : 'Crie sua conta e use todas as ferramentas. Nenhum cartão é pedido.'}
           </p>
           <div className="mt-5">
             <ButtonLink href={isAuthenticated ? '/app' : '/cadastro'} size="lg" block className="uppercase tracking-wide">
@@ -242,7 +264,9 @@ export function Pricing({ isAuthenticated }: { isAuthenticated: boolean }) {
         <Card className="p-6">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-lg font-bold text-ink">Plano único</h3>
-            <Badge tone="neutral">Em breve</Badge>
+            <Badge tone={checkoutDisponivel ? 'success' : 'neutral'}>
+              {checkoutDisponivel ? 'Disponível agora' : 'Em breve'}
+            </Badge>
           </div>
           <p className="mt-3 flex items-baseline gap-1">
             <span className="text-3xl font-bold text-ink">R$ 27,90</span>
@@ -256,13 +280,40 @@ export function Pricing({ isAuthenticated }: { isAuthenticated: boolean }) {
               </li>
             ))}
           </ul>
+
+          {checkoutDisponivel && (
+            <div className="mt-5">
+              <ButtonLink
+                href="/app/upgrade"
+                size="lg"
+                block
+                className="!whitespace-normal text-center uppercase tracking-wide"
+              >
+                Desbloquear meu currículo completo
+              </ButtonLink>
+            </div>
+          )}
+
           <p className="mt-5 text-xs leading-relaxed text-muted">
-            O checkout ainda não está ligado: nenhuma cobrança é feita e nenhum dado de pagamento é
-            coletado. Quem entrar agora será avisado antes de qualquer mudança.{' '}
-            <Link href="/app/upgrade" className="font-medium text-brand-700 underline">
-              Ver detalhes do plano
-            </Link>
-            .
+            {checkoutDisponivel ? (
+              <>
+                Pagamento único pelo Mercado Pago, com PIX, cartão ou boleto — sem assinatura e sem
+                cobrança recorrente.{' '}
+                <Link href="/app/upgrade" className="font-medium text-brand-700 underline">
+                  Ver detalhes do plano
+                </Link>
+                .
+              </>
+            ) : (
+              <>
+                O checkout ainda não está ligado: nenhuma cobrança é feita e nenhum dado de
+                pagamento é coletado. Quem entrar agora será avisado antes de qualquer mudança.{' '}
+                <Link href="/app/upgrade" className="font-medium text-brand-700 underline">
+                  Ver detalhes do plano
+                </Link>
+                .
+              </>
+            )}
           </p>
         </Card>
       </div>

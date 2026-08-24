@@ -9,6 +9,7 @@ import { Card, CardBody, CardHeader, SectionTitle } from '@/components/ui/Card';
 import { Alert, Badge } from '@/components/ui/Feedback';
 import { Icon } from '@/components/ui/Icon';
 import { CheckoutButton } from '@/components/upgrade/CheckoutButton';
+import { PaymentStatusBanner } from '@/components/upgrade/PaymentStatusBanner';
 
 export const metadata: Metadata = { title: 'Plano' };
 
@@ -53,10 +54,11 @@ export default async function UpgradePage({
    * não é defeito. Quem libera o acesso é o webhook, e ele chega por fora, em
    * segundos ou minutos. PIX então costuma demorar mais que o clique de volta.
    *
-   * Dizer isso é obrigatório: sem o aviso, a pessoa que acabou de pagar vê
-   * "Plano: Gratuito" e conclui que perdeu o dinheiro.
+   * `retornouDoCheckout` só marca que a pessoa voltou do Mercado Pago agora —
+   * quem decide o que mostrar é `PaymentStatusBanner`, olhando o status real
+   * gravado pelo webhook, nunca o parâmetro da URL.
    */
-  const aguardandoConfirmacao = retorno === '1' && !jaEhPro;
+  const retornouDoCheckout = retorno === '1';
 
   const compras = await listarPagamentos(user.id);
   const ultima = compras[0];
@@ -65,21 +67,7 @@ export default async function UpgradePage({
     <>
       <SectionTitle title="Plano" description="O que está incluído e como a cobrança funciona." />
 
-      {aguardandoConfirmacao && (
-        <Alert tone="info" title="Estamos confirmando seu pagamento" className="mb-5">
-          <p>
-            Se você concluiu o pagamento, a liberação acontece assim que o Mercado Pago confirmar —
-            costuma levar alguns segundos no cartão e um pouco mais no PIX e no boleto. Você não
-            precisa pagar de novo. Atualize esta página em instantes.
-          </p>
-          {ultima && (
-            <p className="mt-2 text-xs text-muted">
-              Última tentativa registrada: {ultima.status}, em{' '}
-              {new Date(ultima.createdAt).toLocaleString('pt-BR')}.
-            </p>
-          )}
-        </Alert>
-      )}
+      <PaymentStatusBanner retornouDoCheckout={retornouDoCheckout} jaEhPro={jaEhPro} ultimaTentativa={ultima} />
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card className="border-brand-200">
