@@ -26,7 +26,7 @@ import {
   resumeSearchText,
 } from './heuristics';
 import { extractKeywords, extractTools, guessRole } from './keywords';
-import { resumeToText, systemPrompt, trimForPrompt } from './prompts';
+import { resumeAddressMap, resumeToText, systemPrompt, trimForPrompt } from './prompts';
 import {
   atsAnalysisSchema,
   coverLetterSchema,
@@ -681,7 +681,22 @@ export async function reviewResume(input: {
       '- strengths: o que já está bom',
       '- weaknesses: o que está fraco',
       '- opportunities: o que dá para melhorar e ainda não foi tentado',
-      '- issues: problemas concretos. Para cada um: where (onde está, em linguagem de usuário), problem (o que está errado), fix (o que fazer) e severity (alta, media ou baixa). Ordene do mais grave para o menos grave.',
+      '- issues: problemas concretos. Para cada um: where (onde está, em linguagem de usuário), problem (o que está errado), fix (o que fazer), severity (alta, media ou baixa) e anchor. Ordene do mais grave para o menos grave.',
+      '',
+      '  O CAMPO "anchor" É O ENDEREÇO DA MARCA no PDF que a pessoa vai receber, com o problema',
+      '  desenhado em cima do trecho. Ele é diferente de "where": "where" é a frase que ela lê,',
+      '  "anchor" é onde a marca é pintada. Preencha assim:',
+      '    anchor: { "section": "<id de uma seção da lista abaixo>", "entryId": "<id do item, quando o problema for de um item só>" }',
+      '  Regras:',
+      '    - use SOMENTE os ids que aparecem na lista de endereços abaixo, copiados exatamente;',
+      '    - se o problema for da seção inteira (por exemplo, "faltam competências técnicas"), mande só "section";',
+      '    - se o problema for de um item (uma experiência, uma formação), mande "section" e "entryId";',
+      '    - se o problema não couber em nenhuma seção da lista — algo que FALTA no currículo, ou o documento como um todo —, OMITA "anchor" por completo.',
+      '  Endereço errado é pior que endereço ausente: ele marca um trecho que não tem defeito e manda a pessoa reescrever o que estava bom.',
+      '',
+      '=== ENDEREÇOS DISPONÍVEIS NESTE CURRÍCULO ===',
+      resumeAddressMap(resume),
+      '',
       '- recommendations: recomendações específicas e acionáveis, na ordem em que devem ser feitas',
       '- keywords: { present: termos relevantes que já aparecem, missing: termos relevantes ausentes }',
       '- optimized: a versão profissional reescrita, com:',

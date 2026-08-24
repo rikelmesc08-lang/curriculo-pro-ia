@@ -215,6 +215,18 @@ export const resumeReviewSchema = z.object({
         problem: shortText,
         fix: shortText,
         severity: looseEnum(['alta', 'media', 'baixa']),
+        /**
+         * Endereço da marcação no PDF de diagnóstico.
+         *
+         * `catch(undefined)` e não validação estrita: um endereço malformado
+         * não pode derrubar a análise inteira, que é o produto. Quem confere se
+         * a seção e o item existem MESMO é `resolveIssueMarks`, contra o
+         * currículo real — aqui só garantimos a forma.
+         */
+        anchor: z
+          .object({ section: shortText, entryId: shortText.optional() })
+          .optional()
+          .catch(undefined),
       })
     )
     .max(20)

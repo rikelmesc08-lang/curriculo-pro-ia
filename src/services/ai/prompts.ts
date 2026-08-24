@@ -1,5 +1,7 @@
 import type { Resume } from '@/types/resume';
 import { periodLabel } from '@/lib/utils';
+import { toContent } from '@/lib/resume/draft';
+import { buildSections } from '@/lib/resume/sections';
 
 /**
  * Prompts do produto, num arquivo só.
@@ -143,4 +145,36 @@ export function trimForPrompt(value: string, maxChars: number): string {
   const clean = value.trim();
   if (clean.length <= maxChars) return clean;
   return `${clean.slice(0, maxChars)}\n[...texto truncado...]`;
+}
+
+/**
+ * Mapa de endereços do currículo, para o modelo dizer ONDE está cada problema.
+ *
+ * O modelo já descreve o lugar em português ("no resumo profissional"), e isso
+ * serve para a pessoa ler — não para o código encontrar a linha. Este bloco dá
+ * a ele os identificadores REAIS deste currículo, os mesmos que
+ * `buildSections` usa, para que a marcação do PDF de diagnóstico pouse no
+ * trecho certo.
+ *
+ * SÓ SÃO LISTADAS AS SEÇÕES QUE ESTE CURRÍCULO TEM. Oferecer a lista completa
+ * de seções possíveis convidaria o modelo a apontar "projetos" num currículo
+ * sem projetos — endereço que o código descarta depois, mas que custa uma marca
+ * a menos na tela por um erro que dava para evitar aqui.
+ */
+export function resumeAddressMap(resume: Resume): string {
+  const sections = buildSections(toContent(resume));
+  if (sections.length === 0) return '(currículo ainda sem seções preenchidas)';
+
+  const lines: string[] = [];
+  for (const section of sections) {
+    lines.push(`- section: "${section.id}"  (${section.title})`);
+    if (section.kind === 'entries') {
+      for (const entry of section.entries) {
+        if (!entry.sourceId) continue;
+        const nome = [entry.title, entry.subtitle].filter(Boolean).join(' — ') || '(sem título)';
+        lines.push(`    entryId: "${entry.sourceId}"  → ${nome}`);
+      }
+    }
+  }
+  return lines.join('\n');
 }
