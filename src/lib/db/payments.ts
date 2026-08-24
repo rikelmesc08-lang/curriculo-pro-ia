@@ -33,10 +33,22 @@ function adminClient() {
   const url = env.supabaseUrl();
   const chave = env.supabaseServiceRoleKey();
 
+  /**
+   * A MENSAGEM NOMEIA QUEM FALTOU, e isso não é capricho: as duas variáveis
+   * são exigidas aqui, mas só uma aparecia no texto. Quando `SUPABASE_URL`
+   * estava ausente, o erro acusava a chave — e a caçada ia para o lado errado,
+   * atrás de uma credencial que nunca esteve com problema.
+   */
+  const faltando = [
+    url ? null : 'SUPABASE_URL',
+    chave ? null : 'SUPABASE_SERVICE_ROLE_KEY',
+  ].filter((nome): nome is string => nome !== null);
+
   if (!url || !chave) {
     throw new Error(
-      'SUPABASE_SERVICE_ROLE_KEY é obrigatória para processar pagamentos com DB_DRIVER=supabase. ' +
-        'Sem ela o webhook não consegue confirmar a compra de ninguém.'
+      `${faltando.join(' e ')} ${faltando.length > 1 ? 'são obrigatórias' : 'é obrigatória'} ` +
+        'para processar pagamentos com DB_DRIVER=supabase. ' +
+        'Sem elas o webhook não consegue confirmar a compra de ninguém.'
     );
   }
 
