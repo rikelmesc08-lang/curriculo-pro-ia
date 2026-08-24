@@ -8,6 +8,7 @@ import { env } from '@/lib/env';
 import { fail, ok, type AiActionResult } from '@/lib/forms/action-result';
 import { parseResumeContent } from '@/lib/resume/schema';
 import { detectarTipo, ehImagem } from '@/lib/files/sniff';
+import { MAX_UPLOAD_BYTES, mensagemDeTamanho } from '@/lib/files/limits';
 import { capInput, runWithBudget } from '@/server/ai-budget';
 import { aiErrorMessage } from '@/services/ai';
 import { toDelivery } from '@/services/ai/review-gate';
@@ -58,21 +59,11 @@ import type { Resume } from '@/types/resume';
 
 const MAX_JOB_LENGTH = 20000;
 
-/**
- * Tetos por tipo de arquivo.
- *
- * FOTO TEM TETO MAIOR PORQUE FOTO É MAIOR: um PDF de currículo raramente passa
- * de 1 MB, enquanto uma foto de celular de 12 MP sai com 3 a 6 MB sem esforço.
- * Um limite único obrigaria a escolher entre recusar metade das fotos ou abrir
- * demais para PDF.
- *
- * O limite do Next para Server Action está acima dos dois (`next.config.ts`) de
- * propósito: a recusa precisa acontecer AQUI, com mensagem escrita para gente,
- * em vez de a plataforma cortar a requisição e o usuário ver um erro de rede
- * sem causa aparente.
+/*
+ * O teto de upload mora em `@/lib/files/limits`, importado também pelo cliente.
+ * Ele vem do corte de requisição da plataforma, não de uma preferência nossa —
+ * a explicação inteira está lá.
  */
-const MAX_PDF_BYTES = 4 * 1024 * 1024;
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 /** Quanto texto colado de currículo aceitamos antes do corte. */
 const MAX_RESUME_TEXT = 20000;
@@ -359,15 +350,8 @@ export async function importResumeFromFileAction(
     );
   }
 
-  const teto = ehImagem(tipo) ? MAX_IMAGE_BYTES : MAX_PDF_BYTES;
-  if (arquivo.size > teto) {
-    const mb = (arquivo.size / 1024 / 1024).toFixed(1);
-    const limite = (teto / 1024 / 1024).toFixed(0);
-    return fail(
-      ehImagem(tipo)
-        ? `Sua foto tem ${mb} MB e o limite é ${limite} MB. Tire de novo com resolução menor, ou cole o texto do currículo.`
-        : `Seu arquivo tem ${mb} MB e o limite é ${limite} MB. Salve o PDF em qualidade menor, ou cole o texto do currículo.`
-    );
+  if (arquivo.size > MAX_UPLOAD_BYTES) {
+    return fail(mensagemDeTamanho(arquivo.size, ehImagem(tipo)));
   }
 
   const conteudo = Buffer.from(bytes);

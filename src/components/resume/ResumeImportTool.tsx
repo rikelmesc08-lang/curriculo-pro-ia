@@ -7,6 +7,7 @@ import { saveResumeAction } from '@/server/actions/resume';
 import { useAiAction } from '@/hooks/useAiAction';
 import { track } from '@/lib/analytics/track';
 import { reduzirImagem } from '@/lib/files/downscale';
+import { MAX_UPLOAD_BYTES, mensagemDeTamanho } from '@/lib/files/limits';
 import type { ResumeImport } from '@/services/ai/resume-import-schema';
 import type { ResumeContent } from '@/types/resume';
 import { Button } from '@/components/ui/Button';
@@ -34,9 +35,6 @@ import { Alert } from '@/components/ui/Feedback';
  * sequer começar a ler.
  */
 
-/** Tetos iguais aos do servidor. Aqui é só para a recusa ser instantânea. */
-const MAX_PDF = 4 * 1024 * 1024;
-const MAX_FOTO = 8 * 1024 * 1024;
 
 /** Mínimo de texto colado que ainda pode ser um currículo. Igual ao do servidor. */
 const MIN_TEXTO = 100;
@@ -101,17 +99,12 @@ export function ResumeImportTool({ existingResumeId }: { existingResumeId: strin
      * reduzida, teria 700 KB e funcionaria perfeitamente. PDF passa intacto.
      */
     const pronto = await reduzirImagem(file);
-    const foto = pronto.type.startsWith('image/');
-    const teto = foto ? MAX_FOTO : MAX_PDF;
+    const foto = pronto.type.startsWith('image/') || file.type.startsWith('image/');
 
-    if (pronto.size > teto) {
-      const mb = (pronto.size / 1024 / 1024).toFixed(1);
-      const limite = (teto / 1024 / 1024).toFixed(0);
-      setRecusa(
-        foto
-          ? `Sua foto tem ${mb} MB e o limite é ${limite} MB. Tire de novo com resolução menor, ou cole o texto na outra aba.`
-          : `Seu arquivo tem ${mb} MB e o limite é ${limite} MB. Salve o PDF em qualidade menor, ou cole o texto na outra aba.`
-      );
+    // A recusa usa a MESMA frase do servidor, do mesmo módulo: quem bate nos
+    // dois não pode receber duas explicações diferentes para o mesmo problema.
+    if (pronto.size > MAX_UPLOAD_BYTES) {
+      setRecusa(mensagemDeTamanho(pronto.size, foto));
       setArquivo(null);
       return;
     }

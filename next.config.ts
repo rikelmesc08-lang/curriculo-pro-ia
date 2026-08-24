@@ -86,15 +86,19 @@ const nextConfig: NextConfig = {
    * Existe pela importação de currículo: o padrão do Next é 1 MB, e uma FOTO de
    * celular passa disso sem esforço.
    *
-   * O NÚMERO AQUI É MAIOR QUE OS LIMITES DE VERDADE — 4 MB para PDF e 8 MB para
-   * foto, conferidos em `src/server/actions/ai.ts`. A folga é deliberada: quem recusa precisa ser a
-   * nossa validação, que explica o que fazer ("salve em qualidade menor, ou
-   * cole o texto"), e não a plataforma cortando a requisição e deixando o
-   * usuário com um erro de rede sem causa aparente.
+   * O NÚMERO AQUI FICA ENTRE O NOSSO TETO E O DA PLATAFORMA. `MAX_UPLOAD_BYTES`
+   * (em `src/lib/files/limits.ts`) é 4 MB e a Vercel corta em ~4,5 MB; este 4,4
+   * MB fica no meio de propósito. Acima do nosso, para que quem recuse seja a
+   * nossa validação — que explica o que fazer — e não o Next com um erro
+   * genérico. Abaixo do da plataforma, porque passar disso não compraria nada:
+   * o corte da borda acontece antes de o Next opinar.
+   *
+   * Já esteve em 10mb, o que era ficção: anunciava internamente o dobro do que
+   * a plataforma jamais entregaria.
    */
   experimental: {
     serverActions: {
-      bodySizeLimit: '10mb',
+      bodySizeLimit: '4.4mb',
     },
   },
 
