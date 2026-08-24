@@ -17,9 +17,18 @@ import 'server-only';
 /**
  * Domínio do próprio deploy, quando este é um preview da Vercel.
  *
+ * ISTO É UM CASO ESPECIAL DE UMA PLATAFORMA SÓ, E TEMPORÁRIO. A produção deste
+ * projeto está migrando para servidor próprio (Hostinger); o preview da Vercel
+ * continua existindo só porque é, hoje, o ÚNICO ambiente com as credenciais do
+ * Mercado Pago configuradas — é onde o checkout é testado antes do merge. No
+ * dia em que a Hostinger tiver um ambiente de teste equivalente (com as
+ * mesmas credenciais), esta função, as três variáveis `VERCEL_*` que ela lê,
+ * `vercel.json` e `src/lib/deploy-config.test.ts` podem sair juntos — nenhum
+ * outro ponto do projeto depende deles.
+ *
  * Devolve `undefined` em qualquer outra situação — produção, desenvolvimento
- * local, Docker, Fly, Render — e é isso que mantém o resto do projeto
- * independente de plataforma.
+ * local, Docker, Fly, Render, Hostinger — e é isso que mantém o resto do
+ * projeto independente de plataforma.
  *
  * O host é VALIDADO antes de virar URL. Ele vem da plataforma e não de um
  * cliente, mas o valor termina dentro de `new URL()` e de link de e-mail; um
@@ -35,6 +44,27 @@ function urlDoPreview(): string | undefined {
 
   return `https://${host}`;
 }
+
+/**
+ * `PORT` e `HOSTNAME` NÃO ESTÃO NESTE ARQUIVO, E ISSO É DE PROPÓSITO — não
+ * foram esquecidas.
+ *
+ * As duas não são lidas por código de aplicação nenhum: quem as lê é o
+ * `server.js` que o Next GERA no build `standalone` (ver `output` em
+ * `next.config.ts`), antes de qualquer módulo deste projeto carregar. Esse
+ * servidor decide em que porta e em que interface de rede escutar a partir
+ * delas — `HOSTNAME=0.0.0.0` é o que faz o processo aceitar conexão vinda de
+ * fora do próprio contêiner/VM, e não só de `localhost`.
+ *
+ * Quem as define, hoje:
+ *   - `Dockerfile` (estágio `runner`): `PORT=3000`, `HOSTNAME=0.0.0.0`;
+ *   - `ecosystem.config.cjs` (caminho PM2, sem Docker): mesmos valores, na
+ *     seção `env` de cada app.
+ *
+ * Se um dia a aplicação precisar delas para além do boot do servidor (por
+ * exemplo, para montar uma URL interna), leia com a mesma função `read()`
+ * usada no resto deste arquivo — não acesse `process.env` direto fora daqui.
+ */
 
 export type DbDriver = 'local' | 'supabase';
 export type AiProviderId = 'gemini' | 'anthropic' | 'demo';
@@ -222,16 +252,29 @@ export const env = {
    * ainda adianta. O link ia parar num site rodando código antigo, sem erro
    * nenhum aparecer.
    *
-   * A EXCEÇÃO VALE SÓ EM PREVIEW. Produção continua lendo `SITE_URL` e nada
-   * mais: um deploy de produção que resolvesse o próprio endereço sozinho
-   * mandaria e-mail de cliente para um domínio gerado pela plataforma.
+   * A EXCEÇÃO VALE SÓ EM PREVIEW, E `SITE_URL` NÃO GANHA DELA ALI — DE
+   * PROPÓSITO. `SITE_URL`, quando definida, é um valor só para todos os
+   * ambientes (é assim que a variável chega no processo), e em preview ela
+   * carrega o domínio de PRODUÇÃO. Se a checagem de preview lesse `SITE_URL`
+   * primeiro, todo link gerado durante o teste sairia do preview e cairia em
+   * produção, que roda outro código — e nenhum fluxo de e-mail seria
+   * verificável antes do merge, que é justamente quando testar ainda adianta.
+   * Por isso a ordem é `urlDoPreview() ?? read('SITE_URL')`, e não o
+   * contrário: em preview, o domínio da própria plataforma sempre vence.
+   *
+   * PRODUÇÃO CONTINUA LENDO `SITE_URL` E NADA MAIS: um deploy de produção que
+   * resolvesse o próprio endereço sozinho mandaria e-mail de cliente para um
+   * domínio gerado pela plataforma.
    *
    * `VERCEL_BRANCH_URL` antes de `VERCEL_URL` porque o primeiro é estável por
    * branch e o segundo muda a cada deploy — e a lista de endereços permitidos
    * do Supabase precisa casar com o que mandamos.
    *
-   * Fora da Vercel nada disto existe, as variáveis são `undefined`, e a função
-   * se comporta exatamente como antes.
+   * Fora da Vercel — inclusive na Hostinger — nada disto existe, as variáveis
+   * são `undefined`, `urlDoPreview()` devolve `undefined` sempre, e `SITE_URL`
+   * vira a única fonte. Essa é a razão de `SITE_URL` ser chamada de
+   * "autoritativa em produção" no restante da documentação do projeto: fora do
+   * caso especial de preview da Vercel, é a única coisa que este código lê.
    */
   siteUrl: () => urlDoPreview() ?? read('SITE_URL') ?? 'http://localhost:3000',
 
