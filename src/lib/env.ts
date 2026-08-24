@@ -181,6 +181,30 @@ export const env = {
    */
   aiPaywallEnabled: () => read('AI_PAYWALL') === 'on',
 
+  /**
+   * Credenciais do Mercado Pago.
+   *
+   * O TOKEN E O SEGREDO DE WEBHOOK SÃO COISAS DIFERENTES, e trocá-los um pelo
+   * outro é o erro fácil: o token autentica as NOSSAS chamadas à API deles; o
+   * segredo verifica que uma notificação que chegou veio MESMO deles. Sem o
+   * segundo, qualquer pessoa que descubra a URL do webhook pode declarar um
+   * pagamento aprovado e virar `pro` de graça.
+   *
+   * Sem as duas, o checkout fica INDISPONÍVEL e diz isso na tela — nunca
+   * "funciona" pela metade. Ver `src/services/payments/index.ts`.
+   */
+  mercadoPagoAccessToken: () => read('MERCADOPAGO_ACCESS_TOKEN'),
+  mercadoPagoWebhookSecret: () => read('MERCADOPAGO_WEBHOOK_SECRET'),
+
+  /**
+   * Preço em CENTAVOS. Inteiro, nunca decimal.
+   *
+   * 27,90 não existe em ponto flutuante binário. Guardar dinheiro em `number`
+   * decimal produz o centavo que some na conciliação meses depois, quando
+   * ninguém mais lembra de onde veio.
+   */
+  checkoutPriceCents: () => readInt('CHECKOUT_PRICE_CENTS', 2790, 100, 100000),
+
   /** Segredo que assina o cookie de sessão do driver local. */
   sessionSecret: () => read('SESSION_SECRET'),
 

@@ -246,3 +246,84 @@ grant select, insert, update, delete on public.applications to authenticated;
 -- ai_calls: sem update, igual às políticas. Um registro de uso que o próprio
 -- usuário pode editar não limita nada.
 grant select, insert, delete on public.ai_calls to authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- COBRANÇA
+--
+-- Duas coisas acontecem neste bloco, e a primeira é uma CORREÇÃO DE SEGURANÇA
+-- que vale mesmo para quem nunca ligar a cobrança.
+-- ---------------------------------------------------------------------------
+
+
+-- 1. O usuário não pode se promover a `pro` -----------------------------------
+--
+-- A política de update do perfil é por LINHA: `auth.uid() = id`. RLS não
+-- restringe COLUNA. Enquanto o `grant` era `update` na tabela inteira, um
+-- usuário logado podia chamar o Supabase direto com o próprio token e escrever
+-- `plan = 'pro'` em si mesmo — o paywall inteiro contornável numa requisição.
+--
+-- Ninguém explorou porque não havia o que explorar: `AI_PAYWALL` nasceu
+-- desligado e nada cobrava. O buraco só vira prejuízo no dia em que a cobrança
+-- entra no ar, que é exatamente o dia em que ninguém está olhando para cá.
+--
+-- A correção é permissão por coluna, que é o mecanismo certo do Postgres para
+-- isto. O usuário passa a poder editar SÓ o próprio nome. `plan` e `email`
+-- ficam fora do alcance dele.
+--
+-- Quem escreve `plan` é o webhook de pagamento, com a chave `service_role`,
+-- que ignora RLS e não depende destes grants.
+
+revoke update on public.profiles from authenticated;
+grant update (name) on public.profiles to authenticated;
+
+
+-- 2. Pagamentos ---------------------------------------------------------------
+--
+-- Uma linha por tentativa de compra, criada ANTES de mandar a pessoa para o
+-- provedor. Guardar só o "pago" perderia a única pista de quem tentou pagar e
+-- não conseguiu — que é o suporte mais difícil de fazer sem registro.
+--
+-- `payment_ref` É ÚNICO, e é essa restrição que sustenta a idempotência.
+-- Provedor de pagamento reenvia notificação: por retentativa, por instabilidade
+-- da rede, ou porque alguém reprocessou um evento antigo no painel. Sem a
+-- unicidade, o mesmo pagamento poderia ser processado duas vezes. Aqui a
+-- segunda vez esbarra no banco, e não na boa vontade do código.
+--
+-- `amount_cents` em inteiro, nunca em float: 27.90 não existe em ponto
+-- flutuante binário, e dinheiro que "quase" fecha é defeito que só aparece na
+-- conciliação, meses depois.
+
+create table if not exists public.payments (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users (id) on delete cascade,
+  provider text not null default 'mercadopago',
+  -- Id do "pedido" criado no provedor, antes de existir pagamento.
+  preference_ref text,
+  -- Id do pagamento em si. Nulo enquanto ninguém pagou; único quando existe.
+  payment_ref text unique,
+  status text not null default 'pendente'
+    check (status in ('pendente', 'pago', 'recusado', 'cancelado', 'estornado')),
+  amount_cents integer not null check (amount_cents > 0),
+  currency text not null default 'BRL',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists payments_owner_idx on public.payments (owner_id, created_at desc);
+create index if not exists payments_preference_idx on public.payments (preference_ref);
+
+alter table public.payments enable row level security;
+
+-- O usuário LÊ as próprias compras — a tela "meu plano" precisa disso.
+drop policy if exists "pagamento: ler os proprios" on public.payments;
+create policy "pagamento: ler os proprios" on public.payments
+  for select using (auth.uid() = owner_id);
+
+-- E SÓ LÊ. Não há política de insert, update ou delete para o usuário: toda
+-- escrita passa pelo servidor com a chave `service_role`. Deixar o cliente
+-- inserir a própria linha de pagamento significaria deixá-lo escolher o valor
+-- e o status dela.
+
+revoke all on public.payments from anon;
+grant select on public.payments to authenticated;
