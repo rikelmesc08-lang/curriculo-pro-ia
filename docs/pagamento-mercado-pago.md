@@ -27,6 +27,13 @@ vira prejuízo exatamente no dia em que a cobrança entra no ar.
 **Rode o bloco `COBRANÇA` inteiro no editor SQL do Supabase antes de preencher
 qualquer variável.** Ele é idempotente: pode rodar mais de uma vez.
 
+> ✅ **Feito em 24/08/2026.** Conferido depois no catálogo do Postgres: as
+> colunas de `profiles` que `authenticated` pode escrever passaram a ser
+> **só `name`**, `payments` nasceu com RLS ligada, e `anon` não tem privilégio
+> nenhum. Na mesma passada foi acrescentado o bloco `SOBRAS DO PADRÃO DO
+> SUPABASE`, que revoga `TRUNCATE`, `REFERENCES` e `TRIGGER` das cinco tabelas —
+> **`TRUNCATE` ignora RLS**, e vinha por padrão do Supabase sem ninguém pedir.
+
 ---
 
 ## Passo a passo
@@ -84,6 +91,33 @@ conciliação, meses depois.
 
 ### 4. Testar antes de ligar de verdade
 
+> ⚠️ **NESTA CONTA O TESTE COM TOKEN DE TESTE É IMPOSSÍVEL.** Descoberto em
+> 24/08/2026: a conta já criou as **15 contas de teste** que o Mercado Pago
+> permite, e a documentação deles é explícita — *"it is not yet possible to
+> delete them"*. Não há botão nem endpoint, e elas não expiram. O teto é **da
+> conta**, não da aplicação: uma aplicação recém-criada já nasce com ele
+> estourado.
+>
+> Sintoma: "Ativar credenciais de teste" falha sempre com o genérico
+> `DXT40-...`. A causa real só aparece no console do navegador —
+> `[CredentialsActivateUser][ERROR] ... userId: undefined ... 422`. A ativação
+> tenta CRIAR contas de teste e esbarra no teto.
+>
+> **O caminho que sobrou, e que funcionou:**
+>
+> 1. **Simulador de notificações do painel** (Webhooks → Configurar
+>    notificações → Simular notificação). Ele manda uma notificação **assinada
+>    de verdade** contra a nossa URL, sem pagamento e sem conta de teste.
+>    Valida a parte perigosa: assinatura HMAC, janela de tempo, roteamento.
+> 2. **Credenciais de produção escopadas SÓ no ambiente Preview da Vercel**,
+>    com o webhook apontando para o preview. Produção fica sem as variáveis e
+>    sem a rota — o botão de compra não aparece no site.
+> 3. **Um pagamento real de valor baixo** (PIX pelo app do banco) para o pedaço
+>    que nenhuma simulação cobre.
+>
+> Se um dia precisar do sandbox de verdade, o caminho é outra conta Mercado
+> Pago ou o suporte deles liberando a cota.
+
 Com o token de **teste**:
 
 1. Crie um usuário de teste no painel do Mercado Pago (comprador)
@@ -137,6 +171,46 @@ sentidos.
 
 **Nenhum dado de cartão passa por este servidor.** O Checkout Pro é hospedado —
 a pessoa digita o cartão no domínio do Mercado Pago.
+
+---
+
+## O 404 responde 500, e isso é deliberado
+
+Rodar o simulador do painel devolve **`500 - Internal Server Error`**, e o log
+mostra o porquê:
+
+```
+[webhook] Error [PaymentError]: /v1/payments/123456 respondeu 404
+```
+
+**Isso não é defeito — é o teste passando.** O simulador inventa o id `123456`,
+que não existe. O importante é o que o log NÃO tem: nenhuma linha
+`[webhook] assinatura recusada`. A notificação atravessou a verificação de
+assinatura, a janela de tempo e o reconhecimento do tipo, e só parou porque a
+API do provedor — consultada com autenticação válida — disse que o pagamento
+não existe.
+
+**Não espere o simulador "passar".** Com um id inventado ele sempre vai falhar,
+e a métrica "Notificações entregues" do painel fica em 0%.
+
+### Por que qualquer falha de consulta vira 500
+
+`webhook/route.ts` responde 500 para toda exceção ao consultar o pagamento,
+inclusive um 404. O efeito é que o Mercado Pago reenvia.
+
+Isso é escolha, não descuido. **O Mercado Pago às vezes notifica um pagamento
+antes de ele ficar legível na API dele.** Nesse caso o 404 é temporário. Tratar
+404 como definitivo e responder 200 faria o provedor parar de reenviar — e a
+compra de alguém que pagou de verdade ficaria pendente para sempre, sem nenhum
+evento futuro para corrigi-la.
+
+O custo de errar para este lado é reenvio inútil de notificação que não é nossa.
+O custo de errar para o outro lado é o dinheiro de uma pessoa sumir. **Enquanto
+os dois não puderem ser distinguidos com segurança, o conservador é este.**
+
+Se um dia valer distinguir: a saída não é olhar só o 404, é olhar o 404 JUNTO
+com a idade da notificação (`date_created`). Notificação antiga com 404 é
+definitiva; notificação de segundos atrás com 404 é atraso de consistência.
 
 ---
 

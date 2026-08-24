@@ -230,6 +230,10 @@ create policy "ia: apagar as proprias" on public.ai_calls
 -- `authenticated` recebe EXATAMENTE as operações que têm política. Onde não há
 -- política, não há permissão: as duas camadas dizem a mesma coisa, e a segunda
 -- não vira uma brecha silenciosa se alguém mexer na primeira.
+--
+-- ⚠️ ESTES `grant` SOZINHOS NÃO GARANTEM O "EXATAMENTE" ACIMA: eles somam,
+-- não subtraem, e o Supabase já concede privilégios por padrão. Quem tira as
+-- sobras é o bloco SOBRAS DO PADRÃO DO SUPABASE, no fim do arquivo.
 
 revoke all on public.profiles     from anon;
 revoke all on public.resumes      from anon;
@@ -327,3 +331,43 @@ create policy "pagamento: ler os proprios" on public.payments
 
 revoke all on public.payments from anon;
 grant select on public.payments to authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- SOBRAS DO PADRÃO DO SUPABASE
+--
+-- Os `grant` acima são ADITIVOS: dizem o que `authenticated` passa a ter, não
+-- o que ele deixa de ter. O Supabase concede privilégios por padrão a toda
+-- tabela nova do schema `public`, e nada neste arquivo os retirava — só o
+-- `anon` levava `revoke all`. Resultado: o bloco de grants declarava
+-- "EXATAMENTE as operações que têm política" e as cinco tabelas carregavam
+-- três privilégios a mais, silenciosamente.
+--
+-- Medido no banco em 24/08/2026: `REFERENCES`, `TRIGGER` e `TRUNCATE` em
+-- `profiles`, `resumes`, `applications`, `ai_calls` e `payments`.
+--
+-- O QUE IMPORTA AQUI É O TRUNCATE. As políticas de RLS deste arquivo protegem
+-- linha a linha, mas TRUNCATE NÃO É FILTRADO POR RLS: ele esvazia a tabela
+-- inteira sem consultar política nenhuma. Uma policy que diz "cada um vê o seu"
+-- não impede ninguém de apagar o de todos.
+--
+-- Hoje isso não é alcançável por um usuário do produto: o PostgREST não expõe
+-- truncate, então um JWT de `authenticated` não chega lá — chegaria quem
+-- tivesse conexão direta ao Postgres, e essa exige a senha do banco, não o
+-- token. Por isso a correção é higiene, não incêndio. Mas privilégio que
+-- ninguém pediu e ninguém usa é exatamente o que sobrevive a uma mudança
+-- futura de superfície sem que alguém repare.
+--
+-- `REFERENCES` e `TRIGGER` vão junto pelo mesmo motivo: nenhum caminho do
+-- produto cria chave estrangeira nem gatilho com a identidade do usuário.
+--
+-- Revogar privilégio que o papel não tem é no-op, então este bloco é
+-- idempotente e pode rodar em qualquer ordem depois de as tabelas existirem.
+
+revoke truncate, references, trigger on
+  public.profiles,
+  public.resumes,
+  public.applications,
+  public.ai_calls,
+  public.payments
+from authenticated;
