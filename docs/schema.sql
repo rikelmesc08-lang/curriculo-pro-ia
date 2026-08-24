@@ -255,8 +255,9 @@ grant select, insert, delete on public.ai_calls to authenticated;
 -- ---------------------------------------------------------------------------
 -- COBRANÇA
 --
--- Duas coisas acontecem neste bloco, e a primeira é uma CORREÇÃO DE SEGURANÇA
--- que vale mesmo para quem nunca ligar a cobrança.
+-- Três coisas acontecem neste bloco, e a primeira é uma CORREÇÃO DE SEGURANÇA
+-- que vale mesmo para quem nunca ligar a cobrança. A terceira é o grant que
+-- faltou para `service_role`, e sem ele o webhook de pagamento não roda.
 -- ---------------------------------------------------------------------------
 
 
@@ -275,11 +276,58 @@ grant select, insert, delete on public.ai_calls to authenticated;
 -- isto. O usuário passa a poder editar SÓ o próprio nome. `plan` e `email`
 -- ficam fora do alcance dele.
 --
--- Quem escreve `plan` é o webhook de pagamento, com a chave `service_role`,
--- que ignora RLS e não depende destes grants.
+-- Quem escreve `plan` é o webhook de pagamento, com a chave `service_role`.
+--
+-- ⚠️ A frase que estava aqui dizia "que ignora RLS e não depende destes
+-- grants" — ESTAVA ERRADA, e essa frase é a causa raiz de um 500 em produção.
+-- `service_role` ignora RLS (tem BYPASSRLS: nenhuma policy o filtra), mas RLS
+-- e GRANT são camadas diferentes do Postgres — a mesma distinção que abre o
+-- bloco "Permissões de tabela" lá em cima. `service_role` NÃO IGNORA
+-- privilégio de tabela: sem um `grant` explícito para ele, o mesmo
+-- "permission denied for table ..." que este arquivo já tinha documentado
+-- para `authenticated` também acontece com `service_role` — foi o que
+-- derrubou `POST /app/upgrade` (`falha ao criar pagamento: permission denied
+-- for table payments`), porque nenhuma tabela deste arquivo nunca teve grant
+-- nenhum para `service_role`. Ver a nota completa junto do grant de
+-- `payments`, na seção 2 abaixo.
 
 revoke update on public.profiles from authenticated;
 grant update (name) on public.profiles to authenticated;
+
+-- `service_role` toca `plan` só por UPDATE (`definirPlano`, em
+-- src/lib/db/payments.ts). Mas UPDATE (plan) SOZINHO NÃO BASTA, e essa é uma
+-- segunda causa raiz que só apareceu depois de ligar o pagamento de verdade:
+-- `definirPlano` roda
+--
+--   update('profiles').set({ plan }).eq('id', ownerId)
+--
+-- e o Postgres cobra DOIS privilégios diferentes nessa única instrução —
+-- documentado no capítulo "Privileges" da referência de UPDATE: UPDATE na(s)
+-- coluna(s) do SET (`plan`, já concedido acima) E SELECT na(s) coluna(s)
+-- referenciada(s) no WHERE (`id`), mesmo que a instrução nunca devolva linha
+-- nenhuma (sem `.select()` encadeado, sem RETURNING). São checagens
+-- independentes: uma cobre "pode mudar este valor", a outra cobre "pode
+-- localizar a linha para mudar" — e SELECT no WHERE é exigido mesmo estando
+-- ausente o RETURNING que motiva SELECT noutros lugares deste arquivo.
+--
+-- SEM O SELECT (id), o cenário é PIOR que o defeito original: o webhook do
+-- Mercado Pago já confirmou `payments.status = 'pago'` — o cliente JÁ FOI
+-- COBRADO — quando `definirPlano(ownerId, 'pro')`
+-- (src/app/api/pagamento/webhook/route.ts:167) esbarra em "permission denied
+-- for table profiles". Dinheiro cobrado, plano nunca vira `pro`, erro
+-- servidor-a-servidor que ninguém no navegador vê. O defeito original ao
+-- menos barrava a compra ANTES de cobrar; este barraria DEPOIS.
+--
+-- Coluna, não tabela inteira, pela mesma lógica do `authenticated` logo
+-- acima: privilégio que ninguém pediu é exatamente o que sobra despercebido
+-- numa mudança futura — e para `service_role`, que tem BYPASSRLS, o grant é
+-- a ÚNICA trava que resta, não a segunda camada atrás da RLS. `id` é a única
+-- coluna de `profiles` que qualquer instrução de `service_role` referencia
+-- num WHERE hoje; `email`, `name` e `plan` continuam fora do alcance de
+-- leitura dele. Raciocínio completo sobre o alcance de `service_role` na
+-- seção 2.
+grant update (plan) on public.profiles to service_role;
+grant select (id) on public.profiles to service_role;
 
 
 -- 2. Pagamentos ---------------------------------------------------------------
@@ -331,6 +379,162 @@ create policy "pagamento: ler os proprios" on public.payments
 
 revoke all on public.payments from anon;
 grant select on public.payments to authenticated;
+
+
+-- 3. service_role: exatamente o que o servidor toca --------------------------
+--
+-- `adminClient()` (src/lib/db/payments.ts, ~linha 32) é o ÚNICO lugar do
+-- código que fala com o Postgres como `service_role` — a Server Action de
+-- checkout, já autenticada, e o webhook do Mercado Pago, já com a assinatura
+-- verificada. Nenhum outro módulo usa essa chave (conferido em
+-- src/lib/db/supabase/client.ts, o cliente de sessão que todo o resto do app
+-- usa, e que não tem caminho `service_role` — nem sequer carrega essa chave).
+--
+-- O que ele faz, lido em src/lib/db/payments.ts e não por suposição:
+--
+--   payments: SELECT, INSERT, UPDATE — nunca DELETE. criarPagamento insere;
+--   buscarPagamento e listarPagamentos leem; anotarPreferencia e
+--   liquidarPagamento atualizam. Nenhuma função do módulo apaga linha de
+--   pagamento, e não seria desejável que apagasse: a tabela existe também
+--   para guardar tentativa que falhou.
+--
+--   SELECT entra mesmo nas operações que "só escrevem", por DOIS motivos
+--   independentes — não generalize para "todo insert/update precisa de
+--   select", porque cada um se aplica a uma parte diferente da instrução:
+--
+--     1. RETURNING. criarPagamento e liquidarPagamento encadeiam
+--        `.select(COLUNAS)` depois do insert/update, para devolver a linha
+--        (um RETURNING, por baixo do PostgREST), e o Postgres cobra SELECT
+--        nas colunas devolvidas como se fosse leitura.
+--
+--     2. WHERE. anotarPreferencia É A EXCEÇÃO que prova que o motivo 1 não
+--        é geral: ela faz `.update(...).eq('id', paymentId)` SEM `.select()`
+--        nenhum encadeado — não há RETURNING ali. Mesmo assim ela também
+--        precisa de SELECT, porque toda `.eq(...)` vira uma cláusula WHERE, e
+--        o Postgres cobra SELECT na(s) coluna(s) do WHERE independentemente
+--        de haver RETURNING ou não (mesma regra documentada no grant de
+--        `profiles`, seção 1 acima, onde a falta dela quebrou de verdade).
+--
+--   Os dois motivos pedem SELECT nas mesmas colunas de `payments` que o
+--   grant de tabela inteira abaixo já cobre — por isso não há uma segunda
+--   linha de grant só para o WHERE aqui, ao contrário de `profiles`, onde o
+--   grant é por coluna e cada motivo teve que ser concedido explicitamente.
+--
+--   profiles: UPDATE (plan) e SELECT (id), já concedidos na seção 1 —
+--   definirPlano é a única função do módulo que toca profiles, e seu WHERE
+--   só referencia `id`.
+--
+-- POR QUE SÓ ESTAS DUAS TABELAS, E NÃO AS CINCO DO ARQUIVO — pesamos os dois
+-- lados:
+--
+--   A favor de cobrir as cinco de uma vez: uma tabela nova que um dia passe a
+--   precisar de `service_role` e for esquecida aqui quebra em produção do
+--   mesmo jeito que `payments` acabou de quebrar — silenciosamente, só no
+--   clique real, não em teste.
+--
+--   Contra, e é este que decide: para `authenticated`, GRANT é a SEGUNDA
+--   trava — a RLS ainda filtra linha por linha atrás dela, então um grant
+--   largo demais em `authenticated` é sobra, não é brecha por si só (é por
+--   isso que o bloco SOBRAS DO PADRÃO DO SUPABASE, no fim do arquivo, trata a
+--   sobra como higiene, e não como incêndio). Para `service_role`, que tem
+--   BYPASSRLS, GRANT É A ÚNICA trava que sobra — não existe segunda camada
+--   atrás dela. Dar a esta chave select/insert/update em resumes,
+--   applications e ai_calls sem que nenhum código use isso hoje não destrava
+--   produto nenhum — só aumenta o que um vazamento desta chave, ou um bug
+--   futuro que chame `adminClient()` na tabela errada, alcançaria. É o mesmo
+--   raciocínio do bloco SOBRAS DO PADRÃO DO SUPABASE, aplicado à chave que
+--   menos tolera sobra, porque é a única sem RLS para segurar o resto.
+--
+-- Decisão: só payments e profiles, só as operações usadas hoje. Se um dia
+-- resumes, applications ou ai_calls precisarem de `service_role` — um job de
+-- limpeza de `ai_calls`, por exemplo —, o grant entra junto com aquele
+-- código, do lado da tabela que ele toca, com o mesmo raciocínio escrito
+-- aqui. É o mesmo motivo pelo qual a "tabela nova esquecida" some deste
+-- arquivo: quem adicionar acesso privilegiado novo tem, bem aqui do lado, o
+-- lembrete de que GRANT para `service_role` não é automático neste projeto.
+--
+-- Este grant é aditivo e idempotente, como os demais deste arquivo: rodar de
+-- novo não soma nem retira nada.
+
+grant select, insert, update on public.payments to service_role;
+
+
+-- ---------------------------------------------------------------------------
+-- VERIFICAÇÃO
+--
+-- Este bloco fica ANTES de SOBRAS DO PADRÃO DO SUPABASE de propósito: o
+-- restante do arquivo já chama aquele bloco de "fim do arquivo" em dois
+-- comentários diferentes (linhas 236 e 438) — mover VERIFICAÇÃO para depois
+-- quebraria essa referência. Então SOBRAS continua sendo o último bloco, e
+-- VERIFICAÇÃO entra logo antes dele, não depois.
+--
+-- Cole SÓ a consulta abaixo (sem o `--` de comentário) no editor SQL do
+-- Supabase depois de rodar este arquivo, para conferir os grants sem depender
+-- de rolar a grade de resultados do painel — ela é de PROPÓSITO agregada numa
+-- linha só com `string_agg`, porque o painel mostra 5 linhas por vez e some
+-- entre rolagens.
+--
+-- Ela junta duas fontes do catálogo porque um grant de TABELA e um grant de
+-- COLUNA aparecem em lugares diferentes do information_schema:
+--   `table_privileges` só mostra privilégio concedido na tabela inteira;
+--   `column_privileges` mostra o que foi concedido por `grant ... (coluna)`,
+--   como `update (name)`, `update (plan)` e `select (id)` deste arquivo — eles
+--   NÃO aparecem em `table_privileges`, mesmo existindo de verdade.
+--
+-- select
+--   (select string_agg(table_name || '/' || grantee || '=' || privs, '; ' order by table_name, grantee)
+--    from (
+--      select table_name, grantee, string_agg(privilege_type, ',' order by privilege_type) as privs
+--      from information_schema.table_privileges
+--      where table_schema = 'public'
+--        and table_name in ('profiles','resumes','applications','ai_calls','payments')
+--        and grantee in ('anon','authenticated','service_role')
+--      group by table_name, grantee
+--    ) s) as privilegios_de_tabela,
+--   (select string_agg(table_name || '.' || column_name || '/' || grantee || '=' || privilege_type,
+--                       '; ' order by table_name, column_name, grantee)
+--    from information_schema.column_privileges
+--    where table_schema = 'public'
+--      and table_name = 'profiles'
+--      and column_name in ('name', 'plan', 'id')
+--      and grantee in ('authenticated', 'service_role')
+--   ) as privilegios_de_coluna_profiles;
+--
+-- RESULTADO ESPERADO depois deste arquivo, uma linha só:
+--
+--   privilegios_de_tabela deve conter, entre outros:
+--     payments/authenticated=SELECT
+--     payments/service_role=INSERT,SELECT,UPDATE
+--     ai_calls/authenticated=DELETE,INSERT,SELECT
+--     applications/authenticated=DELETE,INSERT,SELECT,UPDATE
+--     resumes/authenticated=DELETE,INSERT,SELECT,UPDATE
+--   e NÃO deve conter nenhuma entrada de `anon`, nem `UPDATE` para
+--   `profiles/authenticated` ou `profiles/service_role` — os updates de
+--   `profiles` são só por coluna e por isso não aparecem aqui (ver acima).
+--
+--   privilegios_de_coluna_profiles deve conter ESTAS TRÊS LINHAS, mais três
+--   que não são bug — leia a ressalva abaixo antes de estranhar a contagem:
+--     profiles.id/service_role=SELECT
+--     profiles.name/authenticated=UPDATE
+--     profiles.plan/service_role=UPDATE
+--
+--   ⚠️ TAMBÉM VÊM, e não são vazamento de privilégio: `profiles.id/
+--   authenticated=SELECT`, `profiles.name/authenticated=SELECT` e
+--   `profiles.plan/authenticated=SELECT`. `column_privileges` expande TODO
+--   grant de tabela inteira numa linha por coluna, incondicionalmente — e
+--   `authenticated` tem `select` de tabela inteira em `profiles` desde a
+--   linha 245 (`grant select, update, delete on public.profiles to
+--   authenticated;`); só o UPDATE foi revogado depois, na linha 294. O SELECT
+--   de tabela inteira nunca foi revogado, e não deveria ser: a política RLS
+--   "perfil: ler o proprio" já é a barreira certa para leitura de `profiles`,
+--   igual às outras quatro tabelas do arquivo — a coluna aqui só restringe
+--   ESCRITA, que é onde RLS não filtra por coluna. Contando as três de cima
+--   com estas três, `privilegios_de_coluna_profiles` traz seis linhas ao
+--   todo, não três.
+--
+-- Se `payments/service_role` ou qualquer uma das três linhas de
+-- `profiles.*/service_role` vier ausente, o grant correspondente não rodou —
+-- volte a este arquivo e rode a seção 1 ou a seção 3 de COBRANÇA de novo.
 
 
 -- ---------------------------------------------------------------------------
