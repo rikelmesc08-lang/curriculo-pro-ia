@@ -180,7 +180,7 @@ Rodar o simulador do painel devolve **`500 - Internal Server Error`**, e o log
 mostra o porquê:
 
 ```
-[webhook] Error [PaymentError]: /v1/payments/123456 respondeu 404
+[webhook] PaymentError: /v1/payments/123456 respondeu 404: <corpo da resposta do Mercado Pago>
 ```
 
 **Isso não é defeito — é o teste passando.** O simulador inventa o id `123456`,
