@@ -165,7 +165,7 @@ describe('config.matcher', () => {
     assert.ok(padrao.includes('api/saude'), 'o matcher não menciona mais api/saude');
   });
 
-  it('exclui os arquivos estáticos que o next.config.ts já cobre', () => {
+  it('exclui os arquivos estáticos que o next.config.mjs já cobre', () => {
     const padrao = config.matcher[0];
     for (const excecao of ['_next/static', '_next/image', 'favicon.ico', 'robots.txt', 'sitemap.xml']) {
       assert.ok(padrao.includes(excecao), `o matcher não menciona mais ${excecao}`);

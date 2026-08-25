@@ -1,5 +1,3 @@
-import type { NextConfig } from 'next';
-
 /**
  * Cabeçalhos de segurança que valem para TODA resposta.
  *
@@ -61,7 +59,8 @@ const HSTS = {
   value: 'max-age=63072000; includeSubDomains',
 };
 
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   // Não anuncia a tecnologia do servidor. Não impede ataque nenhum sozinho, mas
   // tira do atacante a lista de CVEs que vale a pena tentar primeiro.
   poweredByHeader: false,

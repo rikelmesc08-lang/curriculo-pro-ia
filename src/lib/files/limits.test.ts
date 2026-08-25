@@ -42,12 +42,12 @@ describe('tetos de upload — a relação entre eles é o que importa', () => {
   });
 
   it('o bodySizeLimit do Next fica entre o nosso teto e o da plataforma', () => {
-    // Lido do arquivo, e não importado: `next.config.ts` traz `NextConfig`, que
-    // arrasta o mundo do Next para dentro do runner de teste.
-    const config = readFileSync(new URL('../../../next.config.ts', import.meta.url), 'utf8');
+    // Lido do arquivo, e não importado: importar executaria o config inteiro,
+    // e o que interessa aqui é só o número declarado nele.
+    const config = readFileSync(new URL('../../../next.config.mjs', import.meta.url), 'utf8');
     const achado = /bodySizeLimit:\s*'([\d.]+)mb'/.exec(config);
 
-    assert.ok(achado, 'bodySizeLimit não encontrado em next.config.ts');
+    assert.ok(achado, 'bodySizeLimit não encontrado em next.config.mjs');
 
     const bytes = Number(achado[1]) * 1024 * 1024;
     assert.ok(

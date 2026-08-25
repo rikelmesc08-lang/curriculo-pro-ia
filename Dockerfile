@@ -38,7 +38,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Liga a saída `standalone` (ver next.config.ts). Só o build de contêiner define
+# Liga a saída `standalone` (ver next.config.mjs). Só o build de contêiner define
 # isto; o `npm run build` de quem desenvolve continua igual.
 ENV BUILD_STANDALONE=1
 ENV NEXT_TELEMETRY_DISABLED=1
