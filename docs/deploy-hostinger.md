@@ -1,5 +1,40 @@
 # Deploy na Hostinger (VPS)
 
+> # ⚠️ PARE — ESTE NÃO É MAIS O CAMINHO RECOMENDADO
+>
+> **Verificado em 24/08/2026, direto no painel do dono:** a Hostinger tem um
+> produto **Web App Node.js** nos planos de hospedagem compartilhada, com
+> deploy por push no GitHub, variáveis de ambiente e logs de execução — e a
+> conta **já roda um Next.js nele** (`aproveienem.com`, Next.js 16.3.0,
+> Node 22.x, com rota de API, webhook de pagamento e middleware funcionando).
+>
+> O CurrículoPro IA usa Next.js 16.3.1. **Ele cabe ali.** Não é preciso VPS,
+> nem Docker, nem PM2, nem Nginx, nem Certbot — nada do que este guia ensina
+> das seções 2 a 4.
+>
+> Existe um plano **Unlimited** ocioso na conta (expira 2027-08-21, mesma data
+> do domínio `curriculoproia.online`), sem site configurado. É onde publicar.
+>
+> **A afirmação abaixo, de que hospedagem compartilhada "não serve em nenhum
+> plano", ESTÁ ERRADA** e ficou registrada por honestidade. Ela valia para o
+> produto compartilhado clássico (só PHP/MySQL), não para o Web App Node.js.
+>
+> **Este guia continua útil como plano B** — se um dia o app passar dos
+> limites do plano compartilhado, ou se a Hostinger descontinuar o Web App
+> Node.js, o caminho de VPS está aqui, testado e completo.
+>
+> **Duas armadilhas do Web App Node.js já pagas com dor no outro projeto da
+> conta**, que valem para este também:
+>
+> 1. **Um push pode não disparar a implantação.** Já aconteceu: o GitHub
+>    aceitou, a Hostinger não rodou, e a lista seguiu marcando o commit
+>    anterior como "Atual". A saída foi um commit vazio.
+> 2. **Não use o botão "Reimplantar" do painel.** Ele leva a "Configurações e
+>    reimplantação", cuja única ação é "Salvar e reimplantar" — e isso grava o
+>    formulário inteiro junto, incluindo as variáveis de ambiente exibidas
+>    **truncadas**. Se o salvamento gravar o que está visível em vez do valor
+>    completo, derruba as credenciais de produção de uma vez.
+
 Este guia leva o CurrículoPro IA da Vercel para um servidor próprio na
 Hostinger, com o domínio `curriculoproia.online`. É um passo a passo de
 cliques e comandos — sem experiência prévia de administrar servidor.
@@ -9,9 +44,9 @@ processo Node.js **ligado o tempo todo**. Não é uma versão de site que vira
 um monte de arquivos HTML prontos — ele responde pagamento em tempo real
 (`src/app/api/pagamento/webhook/route.ts`), gera PDF na hora
 (`@react-pdf/renderer`), roda 20 Server Actions (`src/server/actions/`) e monta um cabeçalho de
-segurança novo em cada requisição (`src/proxy.ts`). **Por isso hospedagem
-compartilhada (a que só tem PHP/MySQL e gerenciador de arquivos) não serve
-para este site, em nenhum plano dela.** É preciso um VPS.
+segurança novo em cada requisição (`src/proxy.ts`). Esse fato continua
+verdadeiro — o que mudou é que o Web App Node.js da Hostinger **entrega** esse
+processo ligado, coisa que a hospedagem compartilhada clássica não fazia.
 
 ---
 

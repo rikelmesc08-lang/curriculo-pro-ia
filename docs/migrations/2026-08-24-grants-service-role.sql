@@ -1,5 +1,3 @@
-begin;
-
 -- ---------------------------------------------------------------------------
 -- Migration: grants de service_role para o checkout de pagamento funcionar
 -- Data: 2026-08-24
@@ -24,68 +22,86 @@ begin;
 -- ESCOPO. Só o que falta para o pagamento funcionar: grants para
 -- `service_role` em `payments` e em duas colunas de `profiles`. Não recria
 -- tabela que já existe com a estrutura certa, não mexe em policy que já
--- existe, não toca em `resumes`, `applications` nem `ai_calls`.
+-- existe (a não ser para garanti-la, de forma condicional — ver Seção 2),
+-- não toca em `resumes`, `applications` nem `ai_calls`.
 --
--- IDEMPOTÊNCIA. Rodar este arquivo 1, 2 ou 10 vezes produz o mesmo estado.
--- `grant`/`revoke` são idempotentes por definição do Postgres (conceder ou
--- revogar de novo o que já está concedido/revogado é no-op). `create table
--- if not exists`, `create index if not exists` e `alter table ... enable row
--- level security` também são. A única forma que não é idempotente por conta
--- própria é `create policy`, e por isso ela vem sempre precedida de
--- `drop policy if exists` com o mesmo nome — o mesmo padrão já usado em
--- docs/schema.sql.
+-- IDEMPOTÊNCIA E POR QUE NÃO HÁ `begin`/`commit` NESTE ARQUIVO. Todo
+-- statement abaixo é idempotente sozinho: `grant`/`revoke` são idempotentes
+-- por definição do Postgres; `create table if not exists`, `create index if
+-- not exists` e `alter table ... enable row level security` também são. A
+-- ÚNICA peça deste arquivo que não era idempotente por conta própria era
+-- `create policy` — a versão anterior resolvia isso com
+-- `drop policy if exists` na frente, o que abre uma janela sem policy no meio
+-- da execução, e por isso o arquivo inteiro vinha embrulhado em
+-- `begin`/`commit` para fechar essa janela. Esta versão troca o par
+-- drop+create por uma criação CONDICIONAL de verdade (Seção 2: só cria a
+-- policy se ela ainda não existir, consultando `pg_policies` dentro de um
+-- `do $$ ... $$`). Sem `drop`, não existe remoção, não existe janela, e sem
+-- janela não é preciso transação. Cada statement deste arquivo agora roda
+-- isolado, em qualquer ordem de execução parcial, sem deixar o banco pela
+-- metade nem depender de um `commit` que alcance o fim do arquivo.
 --
--- ATOMICIDADE. O `begin;` na primeira linha e o `commit;` logo antes da
--- seção de VERIFICAÇÃO não são decoração: sem eles, o arquivo dependeria de
--- um comportamento IMPLÍCITO do editor SQL do Supabase (tratar o paste como
--- transação única), e isso não é garantido por nada. Se o editor não abrir
--- uma transação só e o script falhar no meio, `payments` pode ficar sem a
--- policy de SELECT por um instante — RLS nega tudo por padrão, então nenhum
--- dado vaza, mas a tela "meu plano" quebra visivelmente até alguém rodar de
--- novo. `begin`/`commit` explícitos fecham essa dúvida: ou o arquivo inteiro
--- aplica, ou nada aplica.
+-- ⚠️ AVISO — O RISCO REAL NÃO É TRAVAR A TABELA, É O BOTÃO "RUN SELECTED".
+-- Em 24/08/2026 este arquivo (então com `begin`/`commit`) foi colado no
+-- editor SQL do Supabase, o botão foi clicado, e a tela mostrou
+-- "Success. No rows returned". PARECIA aplicado. NÃO ESTAVA: nenhum dos três
+-- grants de `service_role` foi de fato concedido — confirmado depois
+-- consultando o catálogo do Postgres (payments: 0 de 3, profiles: 0 de 2).
 --
--- ⚠️ AVISO — POR ISSO COLE O ARQUIVO INTEIRO, NUNCA UM PEDAÇO. O `begin`/
--- `commit` acima resolve o problema de atomicidade, mas abre um risco novo
--- que não existia antes dele, e por honestidade ele precisa estar escrito
--- aqui: `grant` e `revoke` pedem ACCESS EXCLUSIVE LOCK na tabela que tocam —
--- a linha `revoke all on public.payments from anon;`, no bloco A logo
--- abaixo, trava a tabela `payments` INTEIRA até a transação fechar com
--- `commit;`. Se o Ctrl+A falhar, ou você colar só até o meio do arquivo sem
--- alcançar o `commit;` no fim, a sessão fica parada com uma transação ABERTA
--- segurando esse lock — e, se o editor do Supabase mantiver a conexão viva
--- entre uma execução e outra, toda leitura e escrita em `payments` e
--- `profiles` em PRODUÇÃO passa a ENFILEIRAR: a tela "meu plano", o checkout
--- e o próprio webhook do Mercado Pago param de responder, até alguém
--- cancelar a query no painel ou o servidor estourar o tempo limite. Na
--- versão anterior deste arquivo, sem `begin`/`commit`, um paste parcial só
--- fazia trabalho incompleto e idempotente — sem travar nada; o ganho de
--- atomicidade compensa esse risco, mas só se você seguir a regra: cole
--- SEMPRE do `begin;` da primeira linha até a ÚLTIMA linha do arquivo, de uma
--- vez só. E se a query parecer travada — rodando por muito tempo sem
--- terminar — NÃO feche a aba em silêncio: cancele a query ativa no painel do
--- Supabase antes de tentar de novo.
+-- O motivo: o editor SQL do Supabase muda o texto do botão para
+-- "Run selected" sempre que existe QUALQUER seleção de texto na tela — e
+-- nesse modo ele roda SÓ o trecho selecionado, não o arquivo inteiro. A
+-- seleção daquele dia não alcançou o fim do arquivo; o `commit;` de então
+-- ficou de fora; o Postgres desfez tudo sozinho quando a conexão voltou para
+-- o pool sem commit — e como nenhum comando individual falhou, o painel
+-- reportou "Success" mesmo assim.
+--
+-- Para quem não é de banco de dados, em três frases:
+--   1. Antes de clicar em Run, olhe o texto do botão. Se disser
+--      "Run selected" em vez de só "Run", tem texto selecionado, e SÓ ESSE
+--      texto vai rodar.
+--   2. O jeito seguro é não deixar nada selecionado — clique uma vez dentro
+--      do editor para tirar qualquer seleção antes de rodar — ou, se for
+--      colar e rodar tudo, dar Ctrl+A para selecionar o arquivo INTEIRO de
+--      propósito, de cima a baixo, antes de clicar em Run.
+--   3. "Success" na tela NÃO é prova de que aplicou. A prova é a consulta de
+--      VERIFICAÇÃO no fim deste arquivo devolver `TUDO CERTO`. Rode-a
+--      sempre, depois, e leia o texto que ela devolve — não só se apareceu
+--      em verde ou vermelho.
+--
+-- Nesta versão do arquivo o risco de um "Run selected" acidental é bem menor
+-- mesmo que se repita: como não há mais `begin`/`commit`, uma seleção
+-- parcial que ao menos alcance a Seção 1 (os três grants, logo abaixo da
+-- guarda de pré-condição) já aplica o que realmente importa, e aplica de
+-- verdade — sem depender de chegar até o fim do arquivo. Ainda assim, cole e
+-- rode o arquivo INTEIRO sempre que possível: é a única forma de também
+-- garantir a rede de segurança (Seção 2 e 3) e de ver o veredito da
+-- VERIFICAÇÃO no mesmo Run.
 --
 -- NÃO É DESTRUTIVA. Este arquivo não derruba tabela, não apaga coluna, não
--- perde dado. Só soma privilégio que faltava. Se o bloco COBRANÇA de
--- docs/schema.sql (tabela `payments`, RLS, policy de SELECT do dono, revoke
--- de UPDATE amplo em `profiles`) já rodou — e a investigação confirmou no
--- catálogo do Postgres que já rodou, em 24/08/2026 — os blocos A e B abaixo
--- não fazem nada de novo; só o bloco C (os grants de `service_role`) muda
--- algo.
+-- perde dado. Só soma privilégio que faltava (e garante, de forma
+-- condicional, uma policy que já deveria existir).
+--
+-- HISTÓRICO. 24/08/2026: este arquivo, na versão anterior (com
+-- `begin`/`commit`), rodou no editor SQL do Supabase, reportou
+-- "Success. No rows returned" e não aplicou nenhum dos três grants — vítima
+-- do "Run selected" descrito acima. O banco foi corrigido na hora, à mão,
+-- com os três `grant` soltos, sem transação. Esta versão do arquivo existe
+-- para que a mesma armadilha não se repita da próxima vez que alguma
+-- migration precisar rodar aqui.
 -- ---------------------------------------------------------------------------
 
 
 -- Guarda de pré-condição -------------------------------------------------
 --
 -- Esta migration é um DELTA sobre o esquema base, não uma instalação do
--- zero. Se `public.profiles` não existir, o banco nunca rodou
--- docs/schema.sql, e tentar seguir em frente de forma condicional deixaria
--- o banco pela metade (payments criada, mas sem gatilho de perfil, sem as
--- outras quatro tabelas, sem os grants de authenticated). Falha alto e claro
--- em vez de mascarar isso com "if not exists" por todo canto — e, dentro da
--- transação aberta acima, essa falha desfaz qualquer coisa que este arquivo
--- já tivesse feito antes dela.
+-- zero. Confere as duas coisas que os grants da Seção 1, logo abaixo,
+-- precisam encontrar prontas: a tabela `profiles` (base do projeto) e a
+-- tabela `payments` (criada pelo bloco COBRANÇA de docs/schema.sql, já
+-- confirmado no catálogo como aplicado em produção em 24/08/2026). Falha
+-- alto e claro, com mensagem que diz o que falta, em vez de deixar o
+-- `grant ... on public.payments` logo abaixo estourar um
+-- "relation does not exist" sem contexto nenhum.
 
 do $$
 begin
@@ -97,64 +113,28 @@ begin
       'public.profiles não existe — rode docs/schema.sql inteiro primeiro. '
       'Esta migration só soma grants de service_role sobre um esquema base já instalado, não instala o esquema base.';
   end if;
+
+  if not exists (
+    select 1 from information_schema.tables
+    where table_schema = 'public' and table_name = 'payments'
+  ) then
+    raise exception
+      'public.payments não existe — rode docs/schema.sql inteiro primeiro (bloco COBRANÇA). '
+      'Os grants da Seção 1 deste arquivo pressupõem que a tabela payments já foi criada.';
+  end if;
 end $$;
 
 
 -- ---------------------------------------------------------------------------
--- A. Rede de segurança: tabela `payments`, RLS e policy do dono
+-- Seção 1. GRANTS DE SERVICE_ROLE — o que este arquivo REALMENTE precisa
+-- aplicar
 --
--- Reprodução idêntica do bloco COBRANÇA / seção 2 de docs/schema.sql. Existe
--- aqui só para o caso de o bloco COBRANÇA não ter rodado neste banco por
--- algum motivo — o usuário não tem como confirmar isso com certeza. Se a
--- tabela já existe com esta estrutura, `create table if not exists` não faz
--- nada; se a policy já existe, `drop policy if exists` a remove e a
--- `create policy` seguinte recria a mesma coisa — resultado final idêntico.
--- ---------------------------------------------------------------------------
-
-create table if not exists public.payments (
-  id uuid primary key default gen_random_uuid(),
-  owner_id uuid not null references auth.users (id) on delete cascade,
-  provider text not null default 'mercadopago',
-  preference_ref text,
-  payment_ref text unique,
-  status text not null default 'pendente'
-    check (status in ('pendente', 'pago', 'recusado', 'cancelado', 'estornado')),
-  amount_cents integer not null check (amount_cents > 0),
-  currency text not null default 'BRL',
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create index if not exists payments_owner_idx on public.payments (owner_id, created_at desc);
-create index if not exists payments_preference_idx on public.payments (preference_ref);
-
-alter table public.payments enable row level security;
-
-drop policy if exists "pagamento: ler os proprios" on public.payments;
-create policy "pagamento: ler os proprios" on public.payments
-  for select using (auth.uid() = owner_id);
-
-revoke all on public.payments from anon;
-grant select on public.payments to authenticated;
-
-
--- ---------------------------------------------------------------------------
--- B. Rede de segurança: coluna `plan` de `profiles` fora do alcance do dono
---
--- Reprodução idêntica do bloco COBRANÇA / seção 1 de docs/schema.sql (a
--- parte que já rodou). `revoke`/`grant` são idempotentes: se já rodou, isto
--- é no-op.
--- ---------------------------------------------------------------------------
-
-revoke update on public.profiles from authenticated;
-grant update (name) on public.profiles to authenticated;
-
-
--- ---------------------------------------------------------------------------
--- C. O QUE ESTA MIGRATION REALMENTE ACRESCENTA: grants para service_role
---
--- Isto é o único pedaço deste arquivo que, até a data acima, nunca foi
+-- É o único pedaço deste arquivo que, até a data no topo, nunca havia sido
 -- confirmado como executado neste banco. É a causa do 500 em produção.
+-- Fica logo depois da guarda de pré-condição, antes de qualquer rede de
+-- segurança redundante, de propósito: se alguém rodar só o começo do
+-- arquivo — por exemplo, por causa do "Run selected" descrito no aviso do
+-- topo — o que importa já foi aplicado.
 --
 -- Cada grant abaixo é justificado pela função de src/lib/db/payments.ts que
 -- o exige — nada além disso é concedido, porque para `service_role` (que tem
@@ -200,73 +180,120 @@ grant select (id) on public.profiles to service_role;
 -- só acrescentaria manutenção sem ganho de segurança real.
 grant select, insert, update on public.payments to service_role;
 
-commit;
+
+-- ---------------------------------------------------------------------------
+-- Seção 2. Rede de segurança: tabela `payments`, índice, RLS e policy do
+-- dono
+--
+-- Reprodução idêntica do bloco COBRANÇA / seção 2 de docs/schema.sql — existe
+-- aqui só para o caso de aquele bloco não ter aplicado tudo neste banco (a
+-- guarda de pré-condição já garantiu que a TABELA existe, mas não garante
+-- que o índice, a RLS e a policy também foram aplicados). Na prática, tudo
+-- isto já existe em produção; é rede de segurança, não a razão de este
+-- arquivo existir.
+--
+-- `create table if not exists`, `create index if not exists` e
+-- `alter table ... enable row level security` são idempotentes sozinhos.
+--
+-- A policy é a única peça que não seria idempotente com um simples
+-- `create policy` — Postgres não tem `create policy if not exists`. A versão
+-- anterior deste arquivo resolvia isso com `drop policy if exists` +
+-- `create policy`, o que abre uma janela sem policy entre as duas linhas
+-- (RLS nega tudo por padrão nessa janela, então nenhum dado vaza — mas a
+-- tela "meu plano" quebraria até a `create policy` seguinte rodar), e por
+-- isso o arquivo inteiro precisava de `begin`/`commit` para fechar essa
+-- janela. Esta versão evita o dilema: consulta `pg_policies` e só cria a
+-- policy se ela ainda não existir. Sem `drop`, não há remoção, não há
+-- janela, e este bloco roda isolado quantas vezes for preciso.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.payments (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users (id) on delete cascade,
+  provider text not null default 'mercadopago',
+  preference_ref text,
+  payment_ref text unique,
+  status text not null default 'pendente'
+    check (status in ('pendente', 'pago', 'recusado', 'cancelado', 'estornado')),
+  amount_cents integer not null check (amount_cents > 0),
+  currency text not null default 'BRL',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists payments_owner_idx on public.payments (owner_id, created_at desc);
+create index if not exists payments_preference_idx on public.payments (preference_ref);
+
+alter table public.payments enable row level security;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'payments'
+      and policyname = 'pagamento: ler os proprios'
+  ) then
+    execute
+      'create policy "pagamento: ler os proprios" on public.payments '
+      'for select using (auth.uid() = owner_id)';
+  end if;
+end $$;
+
+revoke all on public.payments from anon;
+grant select on public.payments to authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- Seção 3. Rede de segurança: coluna `plan` de `profiles` fora do alcance do
+-- dono
+--
+-- Reprodução idêntica do bloco COBRANÇA / seção 1 de docs/schema.sql (a
+-- parte que já rodou). `revoke`/`grant` são idempotentes: se já rodou, isto
+-- é no-op.
+-- ---------------------------------------------------------------------------
+
+revoke update on public.profiles from authenticated;
+grant update (name) on public.profiles to authenticated;
 
 
 -- ---------------------------------------------------------------------------
 -- VERIFICAÇÃO
 --
--- Já roda como parte deste mesmo script — cole o arquivo inteiro, clique
--- Run uma vez, e o resultado abaixo aparece direto no painel, sem precisar
--- abrir uma segunda query nem editar texto nenhum. É um `select` puro, sem
--- efeito colateral, seguro para reexecutar quantas vezes quiser.
+-- Roda como parte deste mesmo script — cole o arquivo inteiro (nada
+-- selecionado, ou Ctrl+A de propósito antes de rodar — ver aviso no topo),
+-- clique Run uma vez, e o veredito abaixo aparece direto no painel.
 --
--- Agregada numa linha só com `string_agg` de propósito: a grade de
--- resultados do painel do Supabase mostra 5 linhas por vez e o resultado
--- some ao rolar.
---
--- Junta duas fontes do catálogo porque grant de TABELA e grant de COLUNA
--- aparecem em lugares diferentes do information_schema — `table_privileges`
--- não mostra `grant select (id) on ... to service_role`, só grant de tabela
--- inteira; quem mostra isso é `column_privileges`.
+-- Uma coluna só, com um texto curto: `TUDO CERTO` ou `FALTANDO -- ...`. A
+-- versão anterior desta consulta usava `string_agg` para juntar tudo numa
+-- linha só, e o painel do Supabase corta a célula na largura da coluna — no
+-- incidente de 24/08/2026 isso fez o dono do projeto ler só
+-- "payments/authenticated=SELECT" na tela e concluir, errado, que faltava o
+-- resto (que estava lá, só escondido pelo corte). Um veredito curto de uma
+-- palavra ou uma contagem não tem como enganar assim.
 -- ---------------------------------------------------------------------------
 
 select
-  (select string_agg(table_name || '/' || grantee || '=' || privs, '; ' order by table_name, grantee)
-   from (
-     select table_name, grantee, string_agg(privilege_type, ',' order by privilege_type) as privs
-     from information_schema.table_privileges
-     where table_schema = 'public'
-       and table_name = 'payments'
-       and grantee in ('anon', 'authenticated', 'service_role')
-     group by table_name, grantee
-   ) s) as privilegios_de_tabela_payments,
-  (select string_agg(table_name || '.' || column_name || '/' || grantee || '=' || privilege_type,
-                      '; ' order by table_name, column_name, grantee)
-   from information_schema.column_privileges
-   where table_schema = 'public'
-     and table_name = 'profiles'
-     and column_name in ('id', 'plan')
-     and grantee = 'service_role'
-  ) as privilegios_de_coluna_profiles_service_role;
+  case
+    when p.n = 3 and c.n = 2 then 'TUDO CERTO'
+    else 'FALTANDO -- payments: ' || p.n || ' de 3, profiles: ' || c.n || ' de 2'
+  end as resultado
+from
+  (select count(*) as n from information_schema.table_privileges
+    where table_schema = 'public' and table_name = 'payments' and grantee = 'service_role'
+      and privilege_type in ('SELECT', 'INSERT', 'UPDATE')) p,
+  (select count(*) as n from information_schema.column_privileges
+    where table_schema = 'public' and table_name = 'profiles' and grantee = 'service_role'
+      and ((column_name = 'id' and privilege_type = 'SELECT')
+        or (column_name = 'plan' and privilege_type = 'UPDATE'))) c;
 
--- RESULTADO ESPERADO, uma linha só, se esta migration rodou com sucesso:
+-- Se aparecer `FALTANDO -- ...`: releia o aviso do topo sobre "Run selected"
+-- — é a causa mais provável — e rode o arquivo INTEIRO de novo. Cada
+-- statement deste arquivo é idempotente e seguro para repetir; não existe
+-- "rodar só o pedaço que faltou" que quebre alguma coisa.
 --
---   privilegios_de_tabela_payments deve conter, entre outros:
---     payments/authenticated=SELECT
---     payments/service_role=INSERT,SELECT,UPDATE
---   e NÃO deve conter nenhuma entrada de `anon`.
---
---   privilegios_de_coluna_profiles_service_role deve conter EXATAMENTE:
---     profiles.id/service_role=SELECT; profiles.plan/service_role=UPDATE
---
--- SE APARECER MENSAGEM DE ERRO EM VERMELHO, EM VEZ DO RESULTADO ACIMA: é
--- ESPERADO, não é defeito desta consulta. Este arquivo inteiro roda como UMA
--- transação (`begin;` no topo, `commit;` antes desta seção) e não tem nenhum
--- tratamento de erro por dentro — qualquer erro entre essas duas linhas
--- interrompe a execução ali mesmo, e a consulta de verificação, que vem
--- DEPOIS do `commit;`, nunca chega a rodar. Você não vai ver grade de
--- resultado nenhuma, só a mensagem de erro em vermelho — e é isso mesmo que
--- deve acontecer.
---
--- Por causa do `begin`/`commit`, um erro ali significa que NADA foi alterado
--- no banco: a transação inteira foi desfeita, e o estado de `payments` e de
--- `profiles` continua exatamente igual ao que era antes de você colar este
--- arquivo.
---
--- O que fazer: leia a mensagem de erro — ela diz a causa (por exemplo,
--- "public.profiles não existe" é a guarda de pré-condição deste arquivo
--- avisando que docs/schema.sql ainda não rodou neste banco) —, resolva essa
--- causa, e rode o arquivo INTEIRO de novo, do começo. Não tem como "rodar só
--- o pedaço que faltou": o arquivo é idempotente de propósito, então rodá-lo
--- de novo do zero não tem efeito colateral nenhum.
+-- Se aparecer mensagem de erro em vermelho em vez de uma linha com
+-- `resultado`: leia a mensagem — ela diz a causa (por exemplo,
+-- "public.profiles não existe" ou "public.payments não existe" é a guarda de
+-- pré-condição deste arquivo avisando que docs/schema.sql ainda não rodou
+-- neste banco) —, resolva essa causa, e rode o arquivo inteiro de novo.
