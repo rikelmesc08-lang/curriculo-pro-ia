@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
+import { headers } from 'next/headers';
 import { env, warnMissingSiteUrl } from '@/lib/env';
+import { politicaMeta } from '@/lib/seguranca/csp';
 import './globals.css';
 
 /**
@@ -64,9 +66,82 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: LayoutProps<'/'>) {
+/**
+ * `async` e a leitura de `headers()` aqui são a mudança que força TODA rota a
+ * renderizar dinamicamente (nonce é por requisição; página estática não tem
+ * requisição). Medido antes desta mudança: `npm run build` já mostrava toda
+ * página de HTML como `ƒ` (dinâmica) — inclusive a landing e as páginas
+ * legais —, porque o cabeçalho de navegação chama `getSessionUser()`
+ * (`src/lib/auth/session.ts`), que lê `cookies()`. Só `/_not-found` e os
+ * arquivos de ícone/imagem (que não passam por este layout) eram estáticos, e
+ * continuam sendo. Custo real desta mudança: zero rotas a mais viraram
+ * dinâmicas. Tabela de antes/depois no commit que introduziu este comentário.
+ */
+export default async function RootLayout({ children }: LayoutProps<'/'>) {
+  const producao = process.env.NODE_ENV === 'production';
+  // Mesmo nonce que o proxy carimbou nos scripts do Next (via `x-nonce`, lido
+  // em `src/proxy.ts`) — sem isso, o `<meta>` abaixo teria um nonce diferente
+  // do dos `<script>` da página, e todo script legítimo seria bloqueado.
+  const nonce = (await headers()).get('x-nonce') ?? '';
+  const cspMeta = politicaMeta(nonce, producao);
+
   return (
     <html lang="pt-BR" className={inter.variable}>
+      <head>
+        {/*
+          É o ÚNICO filho deste <head> de propósito — entre o que nós
+          escrevemos aqui, precisa ser o primeiro (e é: CSP entregue por
+          <meta> só vale para o que o parser encontra depois dela).
+
+          IMPORTANTE, e medido no HTML de verdade (`next start`, produção,
+          25/08/2026), não deduzido: este <meta> NÃO é o primeiro elemento do
+          <head> renderizado. Antes dele aparecem, nesta ordem: os dois
+          `<meta>` que o Next emite sempre (charset, viewport), a folha de
+          estilo e os `<script>` do bundle de hidratação (o próprio
+          "document shell" do App Router — sai antes de QUALQUER filho do
+          layout, inclusive antes da Metadata API), e depois os `<meta>`/
+          `<title>`/`<link rel=icon>` resolvidos do `export const metadata`
+          acima. Isso é arquitetura do Next 16 (React 19 hospeda recursos —
+          script, link, style — no <head> na ordem em que são ENCONTRADOS
+          durante a renderização, e o shell do framework e a Metadata API são
+          resolvidos antes do <head> que este componente devolve), não uma
+          falha de posicionamento nosso; não há como um <head> escrito à mão
+          num Server Component furar essa fila.
+
+          Por que isso ainda protege o que importa: tudo que aparece antes
+          deste <meta> é conteúdo do BUILD — nomes de arquivo com hash,
+          strings estáticas que nós escrevemos em `metadata`/`viewport` acima
+          — nunca dado de requisição ou de usuário. O conteúdo que de fato
+          pode carregar entrada hostil (formulários, texto de currículo,
+          qualquer coisa vinda de `children`) mora inteiro dentro de <body>,
+          depois de `</head>`, portanto depois deste <meta>.
+
+          Risco residual real: se um dia alguma rota passar a usar
+          `generateMetadata()` para refletir dado de requisição num `<meta>`
+          ou `<title>` (hoje NENHUMA usa — todas exportam `metadata` como
+          objeto estático; conferido em 25/08/2026), esse valor entraria no
+          HTML antes desta política. Quem adicionar `generateMetadata()`
+          dinâmico a uma rota precisa saber disso.
+
+          Por que existe, apesar do cabeçalho HTTP já carregar a mesma
+          política (`src/proxy.ts`): em produção na Hostinger, o CDN da
+          plataforma (`hcdn`) substitui o cabeçalho `Content-Security-Policy`
+          da resposta por `upgrade-insecure-requests` — confirmado com
+          `curl -sS -D -` em 25/08/2026. O CDN reescreve cabeçalho, não corpo
+          HTML, então o <meta> chega intacto onde o cabeçalho não chega. Nos
+          outros ambientes (preview da Vercel, Docker) o cabeçalho já
+          funciona; o <meta> aqui é redundância, não substituição.
+
+          `politicaMeta()` (`src/lib/seguranca/csp.ts`) usa a MESMA lista de
+          diretivas de `politica()`, com uma exceção: omite `frame-ancestors`,
+          que a especificação marca como inválida dentro de <meta> (o
+          navegador ignora e avisa no console). Isso não abre brecha de
+          clickjacking: `X-Frame-Options: DENY`, em `next.config.mjs`, chega
+          intacto na Hostinger (verificado no mesmo curl) e cobre esse caso
+          para todo navegador que entende o cabeçalho.
+        */}
+        <meta httpEquiv="Content-Security-Policy" content={cspMeta} />
+      </head>
       <body className="min-h-dvh antialiased">
         {/* Primeiro alvo do Tab: quem navega por teclado pula o menu inteiro. */}
         <a

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { politica } from '@/lib/seguranca/csp';
 
 /**
  * Proxy de borda: cabeçalho de caminho, HTTPS e Content-Security-Policy.
@@ -22,53 +23,10 @@ import type { NextRequest } from 'next/server';
  *      antes de ele montar a página, e este é o único ponto onde isso acontece.
  */
 
-/**
- * Diretivas fixas da política.
- *
- * `frame-ancestors 'none'` é a proteção contra clickjacking, e é a versão
- * moderna do `X-Frame-Options` — que também é enviado, em `next.config.mjs`,
- * para navegadores antigos que ignoram esta diretiva.
- *
- * `object-src 'none'` e `base-uri 'self'` fecham duas portas clássicas de XSS:
- * plugin embutido e sequestro de URL relativa via `<base>`.
- *
- * `form-action 'self'` impede que um XSS aponte um formulário desta origem
- * para um servidor de fora — que é como um dado roubado costuma sair.
- */
-function politica(nonce: string, producao: boolean): string {
-  const diretivas = [
-    "default-src 'self'",
-    // `strict-dynamic` faz o navegador confiar no que os scripts com nonce
-    // carregarem, e IGNORAR lista de domínios. É o que permite o Next carregar
-    // os próprios pedaços de JavaScript sem abrir a política para hosts
-    // inteiros. Em desenvolvimento o `unsafe-eval` é inevitável: o recarregador
-    // do Next compila em tempo de execução.
-    producao
-      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
-      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-eval'`,
-    // `unsafe-inline` em estilo, e não em script, é a concessão que sobra: o
-    // Next e o Tailwind injetam `<style>` e atributos `style` sem nonce. O risco
-    // de estilo embutido é ordens de grandeza menor que o de script embutido —
-    // não executa código.
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
-    // As fontes são baixadas no build por `next/font` e servidas daqui. Nenhum
-    // domínio externo precisa ser liberado.
-    "font-src 'self'",
-    producao ? "connect-src 'self'" : "connect-src 'self' ws: wss:",
-    "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "frame-ancestors 'none'",
-    "manifest-src 'self'",
-  ];
-
-  // Em produção, qualquer sub-recurso que escape em http é promovido a https
-  // pelo próprio navegador, em vez de virar conteúdo misto bloqueado.
-  if (producao) diretivas.push('upgrade-insecure-requests');
-
-  return diretivas.join('; ');
-}
+// A política (as diretivas fixas e o porquê de cada uma) mora em
+// `src/lib/seguranca/csp.ts` — compartilhada com `src/app/layout.tsx`, que
+// escreve a mesma política num `<meta>` para sobreviver ao CDN da Hostinger
+// (ver comentário de `politicaMeta()` naquele arquivo).
 
 export function proxy(request: NextRequest) {
   const producao = process.env.NODE_ENV === 'production';
