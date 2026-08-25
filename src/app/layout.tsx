@@ -69,13 +69,27 @@ export const viewport: Viewport = {
 /**
  * `async` e a leitura de `headers()` aqui são a mudança que força TODA rota a
  * renderizar dinamicamente (nonce é por requisição; página estática não tem
- * requisição). Medido antes desta mudança: `npm run build` já mostrava toda
- * página de HTML como `ƒ` (dinâmica) — inclusive a landing e as páginas
- * legais —, porque o cabeçalho de navegação chama `getSessionUser()`
- * (`src/lib/auth/session.ts`), que lê `cookies()`. Só `/_not-found` e os
- * arquivos de ícone/imagem (que não passam por este layout) eram estáticos, e
- * continuam sendo. Custo real desta mudança: zero rotas a mais viraram
- * dinâmicas. Tabela de antes/depois no commit que introduziu este comentário.
+ * requisição). Medido com `npm run build`, comparando a tabela de rotas antes
+ * e depois desta mudança:
+ *
+ *   - Toda página de HTML (landing, páginas legais, `/app/*`, etc.) já era
+ *     `ƒ` (dinâmica) ANTES desta mudança, porque o cabeçalho de navegação
+ *     chama `getSessionUser()` (`src/lib/auth/session.ts`), que lê
+ *     `cookies()`. Para essas rotas, o custo desta mudança é zero.
+ *   - `/apple-icon`, `/icon.svg` e `/opengraph-image` continuam `○`
+ *     (estáticas): são arquivos de imagem/ícone que não passam por este
+ *     layout.
+ *   - `/_not-found` REGREDIU de `○` para `ƒ`. Era a única rota de HTML que
+ *     não chamava `getSessionUser()` e por isso escapava da dinamização
+ *     geral; ao herdar este layout raiz, passa a ler `headers()` como
+ *     qualquer outra página. Efeito prático: uma requisição para uma URL
+ *     inexistente agora é sempre renderizada no servidor, em vez de servir
+ *     um HTML de 404 já pronto — perde o cache de CDN para 404. Severidade
+ *     baixa (não é rota de conversão nem de SEO), mas é custo real, não
+ *     ausência de custo: foi um trade-off aceito, não uma mudança neutra.
+ *     Alternativa de manter `/_not-found` estática (ex.: `<meta>` só nas
+ *     rotas que já eram dinâmicas, fora do layout raiz) NÃO foi implementada
+ *     aqui — decisão de aceitar ou não este custo é do dono do projeto.
  */
 export default async function RootLayout({ children }: LayoutProps<'/'>) {
   const producao = process.env.NODE_ENV === 'production';
