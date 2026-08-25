@@ -51,7 +51,7 @@ function urlDoPreview(): string | undefined {
  *
  * As duas não são lidas por código de aplicação nenhum: quem as lê é o
  * `server.js` que o Next GERA no build `standalone` (ver `output` em
- * `next.config.ts`), antes de qualquer módulo deste projeto carregar. Esse
+ * `next.config.mjs`), antes de qualquer módulo deste projeto carregar. Esse
  * servidor decide em que porta e em que interface de rede escutar a partir
  * delas — `HOSTNAME=0.0.0.0` é o que faz o processo aceitar conexão vinda de
  * fora do próprio contêiner/VM, e não só de `localhost`.

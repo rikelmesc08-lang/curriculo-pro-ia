@@ -304,7 +304,7 @@ Quem recebe a visita do navegador, faz HTTPS e encaminha para a porta 3000
 requisição de até **1 MB**. Este projeto valida upload de foto/PDF até
 `MAX_UPLOAD_BYTES` (4 MB, definido em `src/lib/files/limits.ts`) e permite
 até `4.4mb` no corpo de uma Server Action (`bodySizeLimit`, em
-`next.config.ts`). Sem ajustar o Nginx, uma foto de currículo tirada no
+`next.config.mjs`). Sem ajustar o Nginx, uma foto de currículo tirada no
 celular recebe **413 Request Entity Too Large** do Nginx, antes de chegar
 ao app e antes de qualquer mensagem nossa aparecer — o mesmo tipo de erro
 sem explicação que este projeto já teve que corrigir uma vez do lado da
@@ -340,7 +340,7 @@ server {
 
     # TETO DE UPLOAD. O padrão do Nginx é 1m e cortaria a foto do
     # currículo com 413 antes do app sequer ser chamado. 5m fica acima do
-    # bodySizeLimit do Next (4.4mb, em next.config.ts), com a mesma folga
+    # bodySizeLimit do Next (4.4mb, em next.config.mjs), com a mesma folga
     # que o projeto já usa entre os próprios tetos internos.
     client_max_body_size 5m;
 

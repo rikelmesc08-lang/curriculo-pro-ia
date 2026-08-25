@@ -26,7 +26,7 @@ import type { NextRequest } from 'next/server';
  * Diretivas fixas da política.
  *
  * `frame-ancestors 'none'` é a proteção contra clickjacking, e é a versão
- * moderna do `X-Frame-Options` — que também é enviado, em `next.config.ts`,
+ * moderna do `X-Frame-Options` — que também é enviado, em `next.config.mjs`,
  * para navegadores antigos que ignoram esta diretiva.
  *
  * `object-src 'none'` e `base-uri 'self'` fecham duas portas clássicas de XSS:
@@ -117,7 +117,7 @@ export const config = {
    * e deixa o resto aberto.
    *
    * Os arquivos estáticos ficam de fora: já são servidos com cabeçalhos fixos
-   * por `next.config.ts`, não executam nada, e passá-los pelo proxy custaria uma
+   * por `next.config.mjs`, não executam nada, e passá-los pelo proxy custaria uma
    * execução de função por imagem.
    *
    * `api/saude` TAMBÉM FICA DE FORA, e este é um caso que só apareceu rodando:

@@ -3,7 +3,7 @@
 /**
  * Build de produção em modo `standalone`, fora do Docker.
  *
- * PROBLEMA QUE ESTE ARQUIVO RESOLVE: `next.config.ts` liga `output: 'standalone'`
+ * PROBLEMA QUE ESTE ARQUIVO RESOLVE: `next.config.mjs` liga `output: 'standalone'`
  * quando `process.env.BUILD_STANDALONE === '1'` (ver o comentário lá). A forma
  * óbvia de setar isso na linha de comando é o prefixo de shell POSIX —
  * `BUILD_STANDALONE=1 npm run build` — e essa sintaxe FUNCIONA no bash do
@@ -83,7 +83,7 @@ const standaloneDir = path.join(RAIZ, '.next', 'standalone');
 if (!fs.existsSync(standaloneDir)) {
   console.error(
     '[build-standalone] build concluído, mas .next/standalone não existe. ' +
-      'Confira se next.config.ts ainda lê BUILD_STANDALONE para ligar output: "standalone".'
+      'Confira se next.config.mjs ainda lê BUILD_STANDALONE para ligar output: "standalone".'
   );
   process.exit(1);
 }
