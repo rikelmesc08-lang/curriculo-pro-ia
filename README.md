@@ -102,7 +102,7 @@ depois:
 | O quê | Por que importa |
 | --- | --- |
 | `SITE_URL` com o domínio real | Sem ela, URL canônica, prévia de link e link de recuperação apontam para localhost |
-| `SESSION_SECRET` preenchida | O boot é derrubado de propósito sem ela em produção |
+| `SESSION_SECRET` preenchida | Só é lida pelo driver `local` de sessão (`src/lib/auth/session-cookie.ts`) — com `supabase`, o único driver válido em produção, a sessão vem do `@supabase/ssr` e este segredo nunca é usado |
 | `docs/schema.sql` rodado | A tabela `ai_calls` sustenta o limite de uso e o cache da IA |
 | Teto de execução ≥ 60s | A análise leva ~22s; as rotas declaram `maxDuration = 60` |
 
@@ -117,7 +117,19 @@ próprios metadados, e o buscador só enxerga essa instrução se puder abrir a
 página. Bloquear no `robots.txt` impediria a leitura da meta tag — e a URL ainda
 poderia ser listada, sem conteúdo, a partir de qualquer link para ela.
 
-### Vercel
+### Hostinger (produção atual)
+
+A produção deste projeto roda num VPS na Hostinger, em
+`curriculoproia.online` — passo a passo completo, do zero até o site no ar
+com HTTPS, em [`docs/deploy-hostinger.md`](docs/deploy-hostinger.md).
+
+### Vercel (legado)
+
+A Vercel foi a plataforma de produção até a migração para a Hostinger. O
+`vercel.json` continua no repositório de propósito, como caminho de volta
+caso a Hostinger precise ser revertida — ver a última seção de
+`docs/deploy-hostinger.md`. O restante desta seção documenta como esse
+caminho funciona, para quem for usá-lo.
 
 Um app Next.js sobe sem configuração nenhuma; o `vercel.json` só ajusta as três
 coisas que a detecção automática não adivinha:

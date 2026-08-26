@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build --webpack",
+    "build:standalone": "node scripts/build-standalone.mjs",
     "start": "next start",
+    "start:standalone": "node .next/standalone/server.js",
     "lint": "eslint",
     "test": "node --import tsx --conditions=react-server --test \"src/**/*.test.ts\"",
     "test:watch": "node --import tsx --conditions=react-server --test --watch \"src/**/*.test.ts\""

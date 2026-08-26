@@ -6,6 +6,7 @@ import { env } from '@/lib/env';
 import type { StoredPasswordReset } from '@/lib/auth/reset';
 import type { AiCallRecord } from '@/types/ai';
 import type { Application } from '@/types/application';
+import type { Payment } from '@/types/payment';
 import type { Resume } from '@/types/resume';
 
 /**
@@ -41,10 +42,12 @@ export interface DatabaseShape {
   aiCalls: AiCallRecord[];
   /** Tokens de recuperação de senha. Ver `src/lib/auth/reset.ts`. */
   passwordResets: StoredPasswordReset[];
+  /** Tentativas de compra. Ver `src/lib/db/payments.ts`. */
+  payments: Payment[];
 }
 
 function emptyDatabase(): DatabaseShape {
-  return { version: 1, users: [], resumes: [], applications: [], aiCalls: [], passwordResets: [] };
+  return { version: 1, users: [], resumes: [], applications: [], aiCalls: [], passwordResets: [], payments: [] };
 }
 
 function databasePath(): string {
@@ -82,6 +85,7 @@ async function readDatabase(): Promise<DatabaseShape> {
       // tinha dado em disco.
       aiCalls: parsed.aiCalls ?? [],
       passwordResets: parsed.passwordResets ?? [],
+      payments: parsed.payments ?? [],
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;

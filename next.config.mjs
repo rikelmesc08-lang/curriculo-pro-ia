@@ -2,8 +2,11 @@
  * Cabeçalhos de segurança que valem para TODA resposta.
  *
  * A Content-Security-Policy NÃO está aqui: ela carrega um nonce por requisição
- * e é montada em `src/proxy.ts`. O que fica neste arquivo é o conjunto fixo, que
- * também precisa cobrir os arquivos estáticos — e esses não passam pelo proxy.
+ * e é montada em `src/lib/seguranca/csp.ts`, entregue por `src/proxy.ts` (no
+ * cabeçalho) e por `src/app/layout.tsx` (num `<meta>`, que sobrevive ao CDN da
+ * Hostinger reescrevendo o cabeçalho). O que fica neste arquivo é o conjunto
+ * fixo, que também precisa cobrir os arquivos estáticos — e esses não passam
+ * pelo proxy.
  */
 const CABECALHOS = [
   {
@@ -85,15 +88,44 @@ const nextConfig = {
    * Existe pela importação de currículo: o padrão do Next é 1 MB, e uma FOTO de
    * celular passa disso sem esforço.
    *
-   * O NÚMERO AQUI FICA ENTRE O NOSSO TETO E O DA PLATAFORMA. `MAX_UPLOAD_BYTES`
-   * (em `src/lib/files/limits.ts`) é 4 MB e a Vercel corta em ~4,5 MB; este 4,4
-   * MB fica no meio de propósito. Acima do nosso, para que quem recuse seja a
-   * nossa validação — que explica o que fazer — e não o Next com um erro
-   * genérico. Abaixo do da plataforma, porque passar disso não compraria nada:
-   * o corte da borda acontece antes de o Next opinar.
+   * O NÚMERO AQUI FICA ENTRE O NOSSO TETO E O DA BORDA QUE RECEBE A
+   * REQUISIÇÃO. `MAX_UPLOAD_BYTES` (em `src/lib/files/limits.ts`) é 4 MB, e
+   * este 4,4 MB fica acima dele de propósito: assim, quem recusa um arquivo
+   * grande demais é a NOSSA validação — que explica o que fazer — e não o
+   * Next com um erro genérico de corpo excedido.
+   *
+   * QUEM CORTA NA OUTRA PONTA MUDOU COM O SERVIDOR PRÓPRIO, E ISSO IMPORTA.
+   * Na Vercel, a borda da própria plataforma cortava o corpo da requisição em
+   * ~4,5 MB antes de o Next sequer ser chamado — por isso o 4,4 MB deste
+   * campo sempre coube dentro do que chegava. Num servidor próprio (VPS na
+   * Hostinger) quem fica na frente do Next é um proxy reverso — Nginx, no
+   * caminho documentado deste projeto — e o Nginx tem TETO PRÓPRIO, `client_
+   * max_body_size`, cujo PADRÃO DE FÁBRICA É 1 MB.
+   *
+   * ISSO É UMA ARMADILHA REAL, não teórica: com Nginx no padrão, uma foto de
+   * 2–4 MB (o caso de uso que este limite existe para atender — ver o
+   * histórico em `src/lib/files/limits.ts`) recebe 413 Request Entity Too
+   * Large do Nginx, antes de chegar ao Next e antes de qualquer mensagem
+   * nossa aparecer. O sintoma bate exatamente com o defeito antigo da Vercel
+   * que este arquivo já teve de corrigir — erro de rede sem explicação —, só
+   * que a causa agora está na configuração do servidor, não neste número.
+   *
+   * `client_max_body_size` do Nginx PRECISA ficar em pelo menos 4,4 MB nos
+   * hosts (`server`/`location`) que servem `/app/curriculo/importar` e
+   * quaisquer outras rotas de upload deste projeto — ideal um pouco acima,
+   * pelo mesmo raciocínio de folga que já vale entre `MAX_UPLOAD_BYTES` e
+   * este campo. Isto não é validado por teste nenhum deste repositório
+   * porque vive fora dele, na configuração do proxy do VPS; documentar aqui é
+   * a defesa possível contra o esquecimento.
+   *
+   * O NÚMERO 4,4 MB EM SI NÃO MUDOU E NÃO PRECISA MUDAR: ele já ficava entre
+   * `MAX_UPLOAD_BYTES` (4 MB) e qualquer corte de borda razoável — só o motivo
+   * documentado do lado de fora mudou de plataforma para proxy.
    *
    * Já esteve em 10mb, o que era ficção: anunciava internamente o dobro do que
-   * a plataforma jamais entregaria.
+   * a Vercel jamais entregava — o mesmo tipo de erro que um Nginx mal
+   * configurado reintroduziria hoje, só que na direção contrária (proxy corta
+   * menos do que anunciamos suportar).
    */
   experimental: {
     serverActions: {
