@@ -87,9 +87,16 @@ export const viewport: Viewport = {
  *     um HTML de 404 já pronto — perde o cache de CDN para 404. Severidade
  *     baixa (não é rota de conversão nem de SEO), mas é custo real, não
  *     ausência de custo: foi um trade-off aceito, não uma mudança neutra.
- *     Alternativa de manter `/_not-found` estática (ex.: `<meta>` só nas
- *     rotas que já eram dinâmicas, fora do layout raiz) NÃO foi implementada
- *     aqui — decisão de aceitar ou não este custo é do dono do projeto.
+ *
+ *     CUSTO ACEITO, E POR QUÊ. A alternativa era pôr o `<meta>` só nas rotas
+ *     que já eram dinâmicas, fora do layout raiz, mantendo `/_not-found`
+ *     estática. Foi descartada: ela troca uma regressão de cache numa rota
+ *     que não converte e não indexa por um buraco de cobertura na própria
+ *     defesa que este `<meta>` existe para dar — cada rota nova passaria a
+ *     depender de alguém lembrar de repetir a política, e a que esquecesse
+ *     ficaria sem CSP nenhuma no dia em que o hcdn apagar o cabeçalho. O
+ *     layout raiz cobre toda página de HTML por construção, sem lista para
+ *     manter.
  */
 export default async function RootLayout({ children }: LayoutProps<'/'>) {
   const producao = process.env.NODE_ENV === 'production';
