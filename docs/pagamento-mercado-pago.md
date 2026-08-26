@@ -57,6 +57,27 @@ Ainda no painel da aplicação, em **Webhooks / Notificações**:
 - **Evento:** `Pagamentos` (`payment`)
 - Salve e **copie o segredo (assinatura secreta)** que ele gera
 
+> ⚠️ **Esta URL só está certa depois que o domínio virar para a Hostinger.**
+> Situação em 26/08/2026: `curriculoproia.online` ainda responde pela
+> **Vercel**, enquanto o código roda no Web App Node.js da **Hostinger**
+> (`deeppink-albatross-851735.hostingersite.com`). A virada está decidida e o
+> passo a passo é a seção 2 de
+> [`deploy-web-app-nodejs.md`](deploy-web-app-nodejs.md).
+>
+> A notificação de pagamento tem que chegar no **mesmo ambiente** que guarda
+> `MERCADOPAGO_WEBHOOK_SECRET` e `SUPABASE_SERVICE_ROLE_KEY`. Apontar o
+> webhook para um host cujas variáveis não foram preenchidas faz o pagamento
+> ser cobrado e o acesso **não** ser liberado: a rota responde 503 com
+> `[webhook] MERCADOPAGO_WEBHOOK_SECRET ausente` e o Mercado Pago desiste
+> depois das retentativas — sem nada aparecer para quem pagou além do dinheiro
+> saindo.
+>
+> Então: **ou o domínio já virou e as credenciais estão na Hostinger, ou use o
+> endereço do host que de fato as tem.** Confira antes de cadastrar, com
+> `curl -sI https://curriculoproia.online/ | grep -i "^server:"` — `hcdn` é a
+> Hostinger, `Vercel` é a Vercel. E lembre dos **dois** modos do painel (teste
+> e produção): a URL muda nos dois.
+
 O segredo **não é** o access token. São coisas diferentes:
 
 | | para que serve |
@@ -68,9 +89,19 @@ Sem o segredo, o webhook recusa tudo. É deliberado: a URL não é secreta —
 aparece no painel, em log de borda e em histórico de navegador. Sem verificar a
 assinatura, qualquer POST viraria um "pagamento aprovado".
 
-### 3. Variáveis na Vercel
+### 3. Variáveis no ambiente que atende o webhook
 
-Em **Settings → Environment Variables**, todas como *Sensitive*:
+Cadastre as três **no mesmo host que você usou na URL do passo 2** — é ele que
+vai receber a notificação e liberar o plano. Onde fica a tela:
+
+- **Vercel:** Settings → Environment Variables, todas como *Sensitive*.
+- **Hostinger (Web App Node.js):** painel do Web App → variáveis de ambiente.
+  Leia antes a seção 5 de
+  [`deploy-web-app-nodejs.md`](deploy-web-app-nodejs.md): o botão
+  "Reimplantar" dessa tela já derrubou credenciais de produção gravando
+  valores truncados.
+- **Hostinger (VPS, plano B):** `.env.local` na raiz do projeto, `chmod 600` —
+  seção 5 de [`deploy-hostinger.md`](deploy-hostinger.md).
 
 ```
 MERCADOPAGO_ACCESS_TOKEN     = <access token>

@@ -117,19 +117,33 @@ próprios metadados, e o buscador só enxerga essa instrução se puder abrir a
 página. Bloquear no `robots.txt` impediria a leitura da meta tag — e a URL ainda
 poderia ser listada, sem conteúdo, a partir de qualquer link para ela.
 
-### Hostinger (produção atual)
+### Hostinger — Web App Node.js (onde o código roda)
 
-A produção deste projeto roda num VPS na Hostinger, em
-`curriculoproia.online` — passo a passo completo, do zero até o site no ar
-com HTTPS, em [`docs/deploy-hostinger.md`](docs/deploy-hostinger.md).
+O app está no ar num **Web App Node.js** da Hostinger (hospedagem
+compartilhada, deploy por push no GitHub), em
+`deeppink-albatross-851735.hostingersite.com`. Guia completo — deploy,
+variáveis no painel, o que o CDN `hcdn` faz com os cabeçalhos, e recuperação
+de desastre — em
+[`docs/deploy-web-app-nodejs.md`](docs/deploy-web-app-nodejs.md).
 
-### Vercel (legado)
+O caminho de **VPS** (Docker/PM2/Nginx/Certbot) está em
+[`docs/deploy-hostinger.md`](docs/deploy-hostinger.md) e é **plano B**:
+continua testado e completo, para o dia em que o plano compartilhado não der
+mais conta.
 
-A Vercel foi a plataforma de produção até a migração para a Hostinger. O
-`vercel.json` continua no repositório de propósito, como caminho de volta
-caso a Hostinger precise ser revertida — ver a última seção de
-`docs/deploy-hostinger.md`. O restante desta seção documenta como esse
-caminho funciona, para quem for usá-lo.
+### Vercel (ainda atende o domínio, até a virada)
+
+**`curriculoproia.online` responde pela Vercel** — verificado em 26/08/2026
+(`Server: Vercel` no cabeçalho). A migração levou o código, não o DNS, e os
+dois deploys estão vivos servindo o mesmo commit.
+
+**O domínio vai para a Hostinger** — decidido, ainda não executado. O passo a
+passo, com a armadilha de HSTS que essa virada tem, está na seção 2 de
+[`docs/deploy-web-app-nodejs.md`](docs/deploy-web-app-nodejs.md).
+
+Depois da virada, a Vercel continua sendo o caminho de volta: o `vercel.json`
+fica no repositório de propósito, e o projeto lá não deve ser apagado. O
+restante desta seção documenta como esse caminho funciona.
 
 Um app Next.js sobe sem configuração nenhuma; o `vercel.json` só ajusta as três
 coisas que a detecção automática não adivinha:

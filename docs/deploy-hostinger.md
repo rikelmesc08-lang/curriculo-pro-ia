@@ -19,21 +19,20 @@
 > plano", ESTÁ ERRADA** e ficou registrada por honestidade. Ela valia para o
 > produto compartilhado clássico (só PHP/MySQL), não para o Web App Node.js.
 >
+> **O caminho que está no ar é o Web App Node.js, e ele tem documento
+> próprio: [`deploy-web-app-nodejs.md`](deploy-web-app-nodejs.md).** É lá que
+> estão o deploy por push, as variáveis no painel, o que o CDN da Hostinger
+> faz com os cabeçalhos, as duas armadilhas do painel (um push que não
+> dispara a implantação; o botão "Reimplantar", que pode gravar as variáveis
+> de ambiente truncadas e derrubar as credenciais) e a recuperação de
+> desastre. Comece por ele.
+>
 > **Este guia continua útil como plano B** — se um dia o app passar dos
 > limites do plano compartilhado, ou se a Hostinger descontinuar o Web App
-> Node.js, o caminho de VPS está aqui, testado e completo.
->
-> **Duas armadilhas do Web App Node.js já pagas com dor no outro projeto da
-> conta**, que valem para este também:
->
-> 1. **Um push pode não disparar a implantação.** Já aconteceu: o GitHub
->    aceitou, a Hostinger não rodou, e a lista seguiu marcando o commit
->    anterior como "Atual". A saída foi um commit vazio.
-> 2. **Não use o botão "Reimplantar" do painel.** Ele leva a "Configurações e
->    reimplantação", cuja única ação é "Salvar e reimplantar" — e isso grava o
->    formulário inteiro junto, incluindo as variáveis de ambiente exibidas
->    **truncadas**. Se o salvamento gravar o que está visível em vez do valor
->    completo, derruba as credenciais de produção de uma vez.
+> Node.js, o caminho de VPS está aqui, testado e completo. As seções 5
+> (variáveis de ambiente), 6 (webhook do Mercado Pago) e 7 (ler o log)
+> valem para os dois caminhos, e o documento do Web App aponta para elas em
+> vez de duplicá-las.
 
 Este guia leva o CurrículoPro IA da Vercel para um servidor próprio na
 Hostinger, com o domínio `curriculoproia.online`. É um passo a passo de
