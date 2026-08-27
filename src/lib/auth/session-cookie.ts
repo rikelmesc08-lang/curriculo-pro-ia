@@ -52,26 +52,59 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(left, right);
 }
 
-/** Monta o valor do cookie. Só o driver local chama isto. */
-export function createLocalSessionValue(userId: string): { value: string; expiresAt: Date } {
+/**
+ * Monta o valor do cookie. Só o driver local chama isto.
+ *
+ * `sessionVersion` viaja assinado dentro do próprio cookie e é conferido, na
+ * leitura, contra o valor gravado no usuário (`StoredUser.sessionVersion`,
+ * ver `src/lib/auth/local.ts`). Trocar a senha incrementa esse valor e emite
+ * um cookie novo só para quem pediu a troca — todo outro cookie em circulação
+ * carrega o número antigo e para de validar no pedido seguinte. É o
+ * equivalente, no driver local, ao `signOut({ scope: 'others' })` do driver
+ * Supabase.
+ */
+export function createLocalSessionValue(
+  userId: string,
+  sessionVersion: number
+): { value: string; expiresAt: Date } {
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
-  const payload = `${userId}.${expiresAt.getTime()}`;
+  const payload = `${userId}.${expiresAt.getTime()}.${sessionVersion}`;
   return { value: `${payload}.${sign(payload)}`, expiresAt };
 }
 
-/** Devolve o id do usuário se o cookie for válido e não estiver expirado. */
-export function readLocalSession(raw: string | undefined): string | null {
+export interface SessaoLocal {
+  userId: string;
+  sessionVersion: number;
+}
+
+/**
+ * Devolve o id do usuário e a versão de sessão gravados no cookie, se ele for
+ * válido e não estiver expirado.
+ *
+ * MUDANÇA DE FORMATO: cookies emitidos antes deste campo existir tinham três
+ * partes (`id.expiração.assinatura`); os emitidos agora têm quatro
+ * (`id.expiração.versão.assinatura`). Um cookie de três partes é tratado como
+ * inválido, e não como "versão zero" — aceitar as duas formas abriria a
+ * possibilidade de um cookie antigo, sem versão nenhuma, nunca ser pego pela
+ * invalidação. Como o driver local só roda em desenvolvimento, o efeito
+ * prático é: sessões locais abertas antes desta mudança encerram e a pessoa
+ * entra de novo uma vez.
+ */
+export function readLocalSession(raw: string | undefined): SessaoLocal | null {
   if (!raw) return null;
   const parts = raw.split('.');
-  if (parts.length !== 3) return null;
+  if (parts.length !== 4) return null;
 
-  const [userId, expiresAtRaw, signature] = parts;
-  if (!safeEqual(sign(`${userId}.${expiresAtRaw}`), signature)) return null;
+  const [userId, expiresAtRaw, sessionVersionRaw, signature] = parts;
+  if (!safeEqual(sign(`${userId}.${expiresAtRaw}.${sessionVersionRaw}`), signature)) return null;
 
   const expiresAt = Number(expiresAtRaw);
   if (!Number.isFinite(expiresAt) || expiresAt < Date.now()) return null;
 
-  return userId;
+  const sessionVersion = Number(sessionVersionRaw);
+  if (!Number.isInteger(sessionVersion) || sessionVersion < 0) return null;
+
+  return { userId, sessionVersion };
 }
 
 export const sessionCookie = {

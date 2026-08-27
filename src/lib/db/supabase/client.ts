@@ -2,6 +2,7 @@ import 'server-only';
 
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { env } from '@/lib/env';
 
@@ -53,6 +54,46 @@ export async function createSupabaseServerClient(): Promise<SupabaseClient> {
           // @supabase/ssr; a renovação da sessão acontece no próximo POST.
         }
       },
+    },
+  });
+}
+
+/**
+ * Cliente só para REVALIDAR uma senha, nunca para ler ou escrever sessão.
+ *
+ * Usado por `changePasswordAction` (`src/lib/auth/actions.ts`) para conferir
+ * a senha ATUAL antes de trocar. A forma de conferir uma senha no Supabase
+ * Auth é tentar `signInWithPassword` com ela — não existe um endpoint
+ * "só verifique, não abra sessão".
+ *
+ * POR ISSO ESTE CLIENTE NÃO TOCA COOKIE NENHUM: ao contrário de
+ * `createSupabaseServerClient`, que lê e grava o cookie da requisição, este
+ * não recebe `cookies()` do Next e não tem onde persistir nada
+ * (`persistSession: false`, `autoRefreshToken: false`). Se `signInWithPassword`
+ * tentasse gravar uma sessão nova aqui, ela morreria em memória junto com o
+ * cliente — nunca chegaria ao `Set-Cookie` da resposta.
+ *
+ * A alternativa óbvia — reaproveitar `createSupabaseServerClient()` para a
+ * verificação — foi descartada de propósito: aquele cliente ESTÁ ligado ao
+ * cookie da requisição, e uma nova sessão emitida por `signInWithPassword`
+ * ali sobrescreveria a sessão em curso do usuário só para confirmar uma
+ * senha, sem necessidade nenhuma.
+ */
+export function createSupabaseVerifyClient(): SupabaseClient {
+  const url = env.supabaseUrl();
+  const anonKey = env.supabaseAnonKey();
+
+  if (!url || !anonKey) {
+    throw new Error(
+      'SUPABASE_URL e SUPABASE_ANON_KEY são obrigatórias com DB_DRIVER=supabase. Configure-as em .env.local ou use DB_DRIVER=local.'
+    );
+  }
+
+  return createClient(url, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
     },
   });
 }

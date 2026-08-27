@@ -24,6 +24,15 @@ export const passwordSchema = z
   .min(8, 'A senha precisa ter pelo menos 8 caracteres.')
   .max(200, 'A senha é longa demais.');
 
+/**
+ * Senha ATUAL, na troca de senha.
+ *
+ * Só exige "não vazio" — não é a senha sendo definida, é a que já existe e
+ * precisa ser confirmada antes da troca. Regra de formato (tamanho mínimo)
+ * não se aplica a uma senha que já foi aceita no passado.
+ */
+export const currentPasswordSchema = z.string().min(1, 'Informe sua senha atual.');
+
 export const nameSchema = z
   .string()
   .min(2, 'Informe seu nome.')

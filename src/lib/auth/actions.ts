@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getRepository } from '@/lib/db';
-import { createSupabaseServerClient } from '@/lib/db/supabase/client';
+import { createSupabaseServerClient, createSupabaseVerifyClient } from '@/lib/db/supabase/client';
 import { env } from '@/lib/env';
 import { formError, formSuccess, text, type FormState } from '@/lib/forms/state';
 import { destinoOuPadrao } from './destino';
@@ -13,6 +13,7 @@ import { consumeLocalPasswordReset, createLocalPasswordReset } from './reset';
 import { createLocalSessionValue, getSessionUser, sessionCookie } from './session';
 import { limparLimite, mensagemDeLimite, verificarLimite } from './throttle';
 import {
+  currentPasswordSchema,
   emailSchema,
   fieldErrorsFrom,
   normalizeEmail,
@@ -94,7 +95,7 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
       });
     }
 
-    const session = createLocalSessionValue(result.user.id);
+    const session = createLocalSessionValue(result.user.id, result.user.sessionVersion ?? 0);
     const store = await cookies();
     store.set(sessionCookie.name, session.value, sessionCookie.options(session.expiresAt));
   }
@@ -160,7 +161,7 @@ export async function signInAction(_prev: FormState, formData: FormData): Promis
     const result = await authenticateLocalUser({ email, password });
     if (!result.ok) return formError(invalid);
 
-    const session = createLocalSessionValue(result.user.id);
+    const session = createLocalSessionValue(result.user.id, result.user.sessionVersion ?? 0);
     const store = await cookies();
     store.set(sessionCookie.name, session.value, sessionCookie.options(session.expiresAt));
   }
@@ -259,25 +260,93 @@ export async function updateProfileAction(_prev: FormState, formData: FormData):
   return formSuccess('Nome atualizado.');
 }
 
+/**
+ * Troca de senha.
+ *
+ * EXIGE A SENHA ATUAL, revalidada no servidor nos dois drivers. Sem isto,
+ * quem obtém a sessão de outra pessoa — dispositivo destravado, cookie
+ * roubado — trocaria a senha sem conhecer a antiga e trancaria o dono para
+ * fora, e um dono tentando expulsar um invasor por essa via não conseguiria:
+ * a sessão do invasor continuaria válida.
+ *
+ * Depois da troca, as sessões dos OUTROS dispositivos são encerradas — a
+ * sessão que pediu a troca continua ativa, para o formulário não terminar
+ * numa tela deslogada logo após o sucesso:
+ *
+ *   - `supabase`: `signOut({ scope: 'others' })`. A versão instalada de
+ *     `@supabase/auth-js` (2.112.3) suporta este escopo; ele não dispara
+ *     `SIGNED_OUT` nem toca a sessão atual, só revoga as demais no servidor.
+ *   - `local`: incrementa `StoredUser.sessionVersion` e reemite o cookie
+ *     desta sessão com o número novo. Qualquer outro cookie em circulação
+ *     carrega o número antigo e para de validar no próximo pedido — ver
+ *     `getSessionUser` em `./session`.
+ */
 export async function changePasswordAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const user = await getSessionUser();
   if (!user) return formError('Sua sessão expirou. Entre de novo.');
 
-  const parsed = passwordSchema.safeParse(text(formData, 'password'));
-  if (!parsed.success) {
-    return formError('Confira a nova senha.', { password: parsed.error.issues[0].message });
+  const parsedCurrent = currentPasswordSchema.safeParse(text(formData, 'currentPassword'));
+  const parsedNew = passwordSchema.safeParse(text(formData, 'password'));
+
+  if (!parsedCurrent.success || !parsedNew.success) {
+    const fieldErrors: Record<string, string> = {};
+    if (!parsedCurrent.success) fieldErrors.currentPassword = parsedCurrent.error.issues[0].message;
+    if (!parsedNew.success) fieldErrors.password = parsedNew.error.issues[0].message;
+    return formError('Confira os campos destacados.', fieldErrors);
   }
+
+  const currentPassword = parsedCurrent.data;
+  const newPassword = parsedNew.data;
+
+  // TENTAR ADIVINHAR A SENHA ATUAL é força bruta contra uma conta já
+  // autenticada — quem tem a sessão mas não a senha pode testar candidatas
+  // sem limite nenhum se nada aqui parar. Por usuário, e não por IP: o que
+  // importa é quantas tentativas UMA conta sofre.
+  const limite = await verificarLimite('trocaDeSenhaPorUsuario', user.id);
+  if (!limite.permitido) return formError(mensagemDeLimite(limite.esperarSegundos));
+
+  // Mensagem específica de propósito: a pessoa já está autenticada (passou
+  // pelo login), então "senha atual incorreta" não abre porta nenhuma que a
+  // própria sessão não tenha aberto antes — ao contrário do login, aqui não
+  // há e-mail para descobrir.
+  const senhaAtualIncorreta = () =>
+    formError('Confira a senha atual.', { currentPassword: 'Senha atual incorreta.' });
 
   if (env.dbDriver() === 'supabase') {
+    // Revalida a senha ATUAL num cliente que não escreve cookie nenhum — ver
+    // o comentário de `createSupabaseVerifyClient`. Um `signInWithPassword`
+    // no cliente ligado à requisição emitiria uma sessão nova por cima da
+    // sessão em curso só para conferir uma senha, sem necessidade.
+    const verifyClient = createSupabaseVerifyClient();
+    const { error: verifyError } = await verifyClient.auth.signInWithPassword({
+      email: normalizeEmail(user.email),
+      password: currentPassword,
+    });
+    if (verifyError) return senhaAtualIncorreta();
+
     const client = await createSupabaseServerClient();
-    const { error } = await client.auth.updateUser({ password: parsed.data });
+    const { error } = await client.auth.updateUser({ password: newPassword });
     if (error) return formError('Não conseguimos trocar a senha agora. Tente de novo.');
+
+    // Derruba os OUTROS dispositivos; mantém esta sessão logada.
+    await client.auth.signOut({ scope: 'others' });
   } else {
-    const changed = await changeLocalPassword(user.id, parsed.data);
-    if (!changed) return formError('Não conseguimos trocar a senha agora. Tente de novo.');
+    const resultado = await changeLocalPassword(user.id, currentPassword, newPassword);
+    if (!resultado.ok) {
+      if (resultado.reason === 'senha-atual-incorreta') return senhaAtualIncorreta();
+      return formError('Não conseguimos trocar a senha agora. Tente de novo.');
+    }
+
+    // Reemite o cookie DESTA sessão com a versão nova. Qualquer outro cookie
+    // em circulação carrega a versão antiga e para de validar no próximo
+    // pedido dele — o equivalente local ao `scope: 'others'` acima.
+    const session = createLocalSessionValue(user.id, resultado.sessionVersion);
+    const store = await cookies();
+    store.set(sessionCookie.name, session.value, sessionCookie.options(session.expiresAt));
   }
 
-  return formSuccess('Senha atualizada.');
+  limparLimite('trocaDeSenhaPorUsuario', user.id);
+  return formSuccess('Senha atualizada. Os outros dispositivos conectados foram desconectados.');
 }
 
 /**

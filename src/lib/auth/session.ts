@@ -7,6 +7,7 @@ import { getRepository } from '@/lib/db';
 import { createSupabaseServerClient } from '@/lib/db/supabase/client';
 import { env } from '@/lib/env';
 import { caminhoInterno } from './destino';
+import { getLocalSessionVersion } from './local';
 import { readLocalSession, sessionCookie } from './session-cookie';
 import type { SessionUser } from '@/types/user';
 
@@ -76,12 +77,20 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   }
 
   const store = await cookies();
-  const userId = readLocalSession(store.get(SESSION_COOKIE)?.value);
-  if (!userId) return null;
+  const sessao = readLocalSession(store.get(SESSION_COOKIE)?.value);
+  if (!sessao) return null;
 
   const repository = await getRepository();
-  const user = await repository.findUserById(userId);
+  const user = await repository.findUserById(sessao.userId);
   if (!user) return null;
+
+  // A versão gravada no cookie precisa bater com a versão do usuário. Trocar
+  // a senha incrementa a versão do usuário e reemite o cookie só para quem
+  // pediu a troca; qualquer outro cookie em circulação, com a versão antiga,
+  // para de validar aqui — é a invalidação dos OUTROS dispositivos no driver
+  // local. Ver `changeLocalPassword` em `./local`.
+  const versaoAtual = await getLocalSessionVersion(sessao.userId);
+  if (versaoAtual === null || versaoAtual !== sessao.sessionVersion) return null;
 
   return { ...user, driver: 'local' };
 });

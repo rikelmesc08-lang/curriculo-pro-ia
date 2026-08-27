@@ -73,6 +73,11 @@ export const REGRAS = {
   // é este produto, que é quem termina na lista de spam.
   confirmacaoPorEmail: { limite: 3, janelaMs: 60 * 60_000 },
   confirmacaoPorIp: { limite: 10, janelaMs: 60 * 60_000 },
+  // Troca de senha exige a senha ATUAL, e quem tem a sessão mas não a senha
+  // (dispositivo destravado, cookie roubado) pode tentar adivinhá-la — é
+  // força bruta contra uma conta já autenticada, e o mesmo limite do login
+  // por conta cobre o mesmo risco pelo mesmo motivo.
+  trocaDeSenhaPorUsuario: { limite: 5, janelaMs: 15 * 60_000 },
 } as const satisfies Record<string, Regra>;
 
 /**

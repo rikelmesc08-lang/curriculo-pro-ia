@@ -13,6 +13,12 @@ import { createLocalSessionValue, readLocalSession, sessionCookie } from './sess
  * vence. Os dois erros são silenciosos — nada quebra visivelmente, a conta
  * simplesmente fica aberta.
  *
+ * `sessionVersion` viaja no cookie desde a troca de senha passar a exigir
+ * invalidar os outros dispositivos (`changeLocalPassword`, em `./local`): o
+ * número embutido aqui é conferido, na leitura da sessão
+ * (`getSessionUser`, em `./session`), contra o valor gravado no usuário —
+ * fora do escopo deste arquivo, que testa só a ida e volta do cookie em si.
+ *
  * O teste importa de `./session-cookie`, não de `./session`: `session.ts`
  * importa `next/navigation` (para `requireUser`), que não carrega fora de
  * uma requisição real — nem sequer `require('next/navigation')` sozinho
@@ -47,13 +53,18 @@ function setNodeEnv(value: string | undefined): void {
 
 describe('criação e leitura do cookie (ida e volta)', () => {
   it('lê de volta o mesmo id de usuário que assinou', () => {
-    const { value } = createLocalSessionValue('usuario-123');
-    assert.equal(readLocalSession(value), 'usuario-123');
+    const { value } = createLocalSessionValue('usuario-123', 0);
+    assert.deepEqual(readLocalSession(value), { userId: 'usuario-123', sessionVersion: 0 });
+  });
+
+  it('lê de volta a versão de sessão que assinou', () => {
+    const { value } = createLocalSessionValue('usuario-123', 7);
+    assert.deepEqual(readLocalSession(value), { userId: 'usuario-123', sessionVersion: 7 });
   });
 
   it('devolve a data de expiração combinando com SESSION_DAYS (30 dias)', () => {
     const antes = Date.now();
-    const { expiresAt } = createLocalSessionValue('usuario-123');
+    const { expiresAt } = createLocalSessionValue('usuario-123', 0);
     const dias = (expiresAt.getTime() - antes) / (24 * 60 * 60 * 1000);
     assert.ok(dias > 29.9 && dias <= 30.1, `esperava ~30 dias, obteve ${dias}`);
   });
@@ -68,12 +79,12 @@ describe('cookie ausente ou malformado', () => {
     assert.equal(readLocalSession(''), null);
   });
 
-  it('devolve null quando falta uma parte (sem assinatura)', () => {
-    assert.equal(readLocalSession('usuario-123.999999999999'), null);
+  it('devolve null quando faltam partes (formato antigo, sem versão)', () => {
+    assert.equal(readLocalSession('usuario-123.999999999999.assinatura'), null);
   });
 
   it('devolve null quando sobra uma parte', () => {
-    const { value } = createLocalSessionValue('usuario-123');
+    const { value } = createLocalSessionValue('usuario-123', 0);
     assert.equal(readLocalSession(`${value}.extra`), null);
   });
 
@@ -84,38 +95,47 @@ describe('cookie ausente ou malformado', () => {
 
 describe('assinatura', () => {
   it('rejeita assinatura adulterada', () => {
-    const { value } = createLocalSessionValue('usuario-123');
-    const [userId, expiresAt] = value.split('.');
-    const adulterado = `${userId}.${expiresAt}.${'0'.repeat(64)}`;
+    const { value } = createLocalSessionValue('usuario-123', 0);
+    const [userId, expiresAt, sessionVersion] = value.split('.');
+    const adulterado = `${userId}.${expiresAt}.${sessionVersion}.${'0'.repeat(64)}`;
     assert.notEqual(adulterado, value, 'a assinatura de teste coincidiu com a real por acaso');
     assert.equal(readLocalSession(adulterado), null);
   });
 
   it('rejeita id trocado mesmo com a assinatura original', () => {
-    const { value } = createLocalSessionValue('usuario-123');
-    const [, expiresAt, signature] = value.split('.');
+    const { value } = createLocalSessionValue('usuario-123', 0);
+    const [, expiresAt, sessionVersion, signature] = value.split('.');
     // O ataque mais óbvio: pegar o próprio cookie válido e trocar o id para o
     // de outra pessoa, reaproveitando a assinatura antiga.
-    const forjado = `outro-usuario.${expiresAt}.${signature}`;
+    const forjado = `outro-usuario.${expiresAt}.${sessionVersion}.${signature}`;
     assert.equal(readLocalSession(forjado), null);
   });
 
   it('rejeita prazo de expiração trocado mesmo com a assinatura original', () => {
-    const { value } = createLocalSessionValue('usuario-123');
-    const [userId, , signature] = value.split('.');
-    const prazoEstendido = `${userId}.${Date.now() + 365 * 24 * 60 * 60 * 1000}.${signature}`;
+    const { value } = createLocalSessionValue('usuario-123', 0);
+    const [userId, , sessionVersion, signature] = value.split('.');
+    const prazoEstendido = `${userId}.${Date.now() + 365 * 24 * 60 * 60 * 1000}.${sessionVersion}.${signature}`;
     assert.equal(readLocalSession(prazoEstendido), null);
   });
 
+  it('rejeita versão de sessão trocada mesmo com a assinatura original', () => {
+    const { value } = createLocalSessionValue('usuario-123', 0);
+    const [userId, expiresAt, , signature] = value.split('.');
+    // O ataque que a troca de senha precisa fechar: pegar um cookie de versão
+    // antiga e tentar se passar por um mais novo trocando só o número.
+    const versaoForjada = `${userId}.${expiresAt}.9.${signature}`;
+    assert.equal(readLocalSession(versaoForjada), null);
+  });
+
   it('rejeita assinatura vazia', () => {
-    const { value } = createLocalSessionValue('usuario-123');
-    const [userId, expiresAt] = value.split('.');
-    assert.equal(readLocalSession(`${userId}.${expiresAt}.`), null);
+    const { value } = createLocalSessionValue('usuario-123', 0);
+    const [userId, expiresAt, sessionVersion] = value.split('.');
+    assert.equal(readLocalSession(`${userId}.${expiresAt}.${sessionVersion}.`), null);
   });
 
   it('rejeita cookie assinado com outro segredo', () => {
     process.env.SESSION_SECRET = 'segredo-usado-para-assinar-um-cookie-valido';
-    const payload = `usuario-123.${Date.now() + 60_000}`;
+    const payload = `usuario-123.${Date.now() + 60_000}.0`;
     const assinaturaComOutroSegredo = createHmac('sha256', 'segredo-diferente-do-configurado')
       .update(payload)
       .digest('hex');
@@ -123,21 +143,44 @@ describe('assinatura', () => {
   });
 });
 
+describe('versão de sessão', () => {
+  it('rejeita versão não numérica mesmo com assinatura correspondente', () => {
+    process.env.SESSION_SECRET = 'segredo-de-teste-para-verificar-versao';
+    const payload = 'usuario-123.9999999999999.nao-e-um-numero';
+    const assinatura = createHmac('sha256', 'segredo-de-teste-para-verificar-versao')
+      .update(payload)
+      .digest('hex');
+    assert.equal(readLocalSession(`${payload}.${assinatura}`), null);
+  });
+
+  it('rejeita versão negativa mesmo com assinatura correspondente', () => {
+    process.env.SESSION_SECRET = 'segredo-de-teste-para-verificar-versao';
+    const payload = 'usuario-123.9999999999999.-1';
+    const assinatura = createHmac('sha256', 'segredo-de-teste-para-verificar-versao')
+      .update(payload)
+      .digest('hex');
+    assert.equal(readLocalSession(`${payload}.${assinatura}`), null);
+  });
+});
+
 describe('expiração', () => {
   it('aceita um cookie assinado corretamente que ainda não venceu', () => {
     process.env.SESSION_SECRET = 'segredo-de-teste-para-verificar-expiracao';
     const expiraEm = Date.now() + 60_000;
-    const payload = `usuario-123.${expiraEm}`;
+    const payload = `usuario-123.${expiraEm}.0`;
     const assinatura = createHmac('sha256', 'segredo-de-teste-para-verificar-expiracao')
       .update(payload)
       .digest('hex');
-    assert.equal(readLocalSession(`${payload}.${assinatura}`), 'usuario-123');
+    assert.deepEqual(readLocalSession(`${payload}.${assinatura}`), {
+      userId: 'usuario-123',
+      sessionVersion: 0,
+    });
   });
 
   it('rejeita cookie com assinatura válida mas prazo vencido', () => {
     process.env.SESSION_SECRET = 'segredo-de-teste-para-verificar-expiracao';
     const expirouHaUmMinuto = Date.now() - 60_000;
-    const payload = `usuario-123.${expirouHaUmMinuto}`;
+    const payload = `usuario-123.${expirouHaUmMinuto}.0`;
     const assinatura = createHmac('sha256', 'segredo-de-teste-para-verificar-expiracao')
       .update(payload)
       .digest('hex');
@@ -149,7 +192,7 @@ describe('expiração', () => {
 
   it('rejeita prazo não numérico mesmo com assinatura correspondente', () => {
     process.env.SESSION_SECRET = 'segredo-de-teste-para-verificar-expiracao';
-    const payload = 'usuario-123.nao-e-um-numero';
+    const payload = 'usuario-123.nao-e-um-numero.0';
     const assinatura = createHmac('sha256', 'segredo-de-teste-para-verificar-expiracao')
       .update(payload)
       .digest('hex');
@@ -161,14 +204,14 @@ describe('segredo ausente', () => {
   it('usa o segredo de desenvolvimento fora de produção, sem lançar', () => {
     delete process.env.SESSION_SECRET;
     setNodeEnv(undefined);
-    assert.doesNotThrow(() => createLocalSessionValue('usuario-123'));
+    assert.doesNotThrow(() => createLocalSessionValue('usuario-123', 0));
   });
 
   it('recusa assinar sessão em produção sem SESSION_SECRET configurada', () => {
     delete process.env.SESSION_SECRET;
     setNodeEnv('production');
     assert.throws(
-      () => createLocalSessionValue('usuario-123'),
+      () => createLocalSessionValue('usuario-123', 0),
       /SESSION_SECRET é obrigatória em produção/
     );
   });
@@ -176,8 +219,8 @@ describe('segredo ausente', () => {
   it('funciona normalmente em produção quando SESSION_SECRET está configurada', () => {
     setNodeEnv('production');
     process.env.SESSION_SECRET = 'segredo-de-producao-bem-comprido-o-suficiente';
-    const { value } = createLocalSessionValue('usuario-123');
-    assert.equal(readLocalSession(value), 'usuario-123');
+    const { value } = createLocalSessionValue('usuario-123', 0);
+    assert.deepEqual(readLocalSession(value), { userId: 'usuario-123', sessionVersion: 0 });
   });
 });
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
-import { createSupabaseServerClient } from './client';
+import { createSupabaseServerClient, createSupabaseVerifyClient } from './client';
 
 /**
  * Criação do cliente Supabase da requisição.
@@ -85,5 +85,51 @@ describe('variáveis de ambiente ausentes', () => {
         return true;
       }
     );
+  });
+});
+
+/**
+ * `createSupabaseVerifyClient` — usado por `changePasswordAction` para
+ * revalidar a senha ATUAL antes de trocar (ver `src/lib/auth/actions.ts`).
+ *
+ * Ao contrário de `createSupabaseServerClient`, este NÃO chama `cookies()`
+ * de `next/headers` — não tem cookie nenhum para ler ou escrever, de
+ * propósito (ver comentário no arquivo de origem). Por isso o caminho de
+ * SUCESSO também é testável aqui, fora de uma requisição do Next.
+ */
+describe('cliente de revalidação de senha (createSupabaseVerifyClient)', () => {
+  it('recusa criar sem as variáveis de ambiente, com a mesma mensagem do cliente principal', () => {
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_ANON_KEY;
+
+    assert.throws(
+      () => createSupabaseVerifyClient(),
+      /SUPABASE_URL e SUPABASE_ANON_KEY são obrigatórias/
+    );
+  });
+
+  it('cria o cliente sem depender de next/headers quando as variáveis existem', () => {
+    process.env.SUPABASE_URL = 'https://exemplo.supabase.co';
+    process.env.SUPABASE_ANON_KEY = 'anon-key-de-teste';
+
+    // Não lança "cookies was called outside a request scope" — é exatamente
+    // o comportamento que o justifica existir separado do cliente principal.
+    assert.doesNotThrow(() => createSupabaseVerifyClient());
+  });
+
+  it('nunca persiste nem renova sessão automaticamente (não tem onde gravar cookie)', () => {
+    process.env.SUPABASE_URL = 'https://exemplo.supabase.co';
+    process.env.SUPABASE_ANON_KEY = 'anon-key-de-teste';
+
+    const client = createSupabaseVerifyClient() as unknown as {
+      auth: { persistSession?: boolean; autoRefreshToken?: boolean };
+    };
+
+    // A biblioteca guarda as opções normalizadas dentro do próprio client;
+    // conferir aqui é o que impede uma mudança futura de religar
+    // `persistSession` por engano e reabrir o risco que este cliente existe
+    // para fechar.
+    assert.equal(client.auth.persistSession, false);
+    assert.equal(client.auth.autoRefreshToken, false);
   });
 });
