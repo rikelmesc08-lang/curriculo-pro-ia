@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { cache } from 'react';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getRepository } from '@/lib/db';
@@ -36,8 +37,22 @@ export { createLocalSessionValue, sessionCookie } from './session-cookie';
  * Nunca lança por falta de sessão — quem precisa de usuário chama
  * `requireUser()`. Isso deixa a landing e as páginas públicas usarem a mesma
  * função para decidir se mostram "Entrar" ou "Ir para o painel".
+ *
+ * ENVOLVIDA EM `cache()` DO REACT, DE PROPÓSITO: layout e página de `/app`
+ * chamam `requireUser()` (que chama esta função) em paralelo, e cada chamada
+ * criava seu próprio cliente Supabase e fazia sua própria ida a
+ * `auth.getUser()` — duas renovações de sessão concorrentes disputando o
+ * mesmo refresh token dentro da MESMA requisição. `cache()` do React dedupe
+ * por render: a primeira chamada resolve, a segunda (mesmo argumento, aqui
+ * nenhum) reaproveita a mesma Promise, sem segunda ida ao Supabase. O escopo
+ * é por requisição — não sobrevive entre requisições diferentes nem entre
+ * usuários.
+ *
+ * O `cache()` envolve só a LEITURA, nunca o `redirect()` de `requireUser()`
+ * logo abaixo: `redirect()` lança, e cachear uma função que lança quebraria
+ * o dedupe para toda chamada seguinte no mesmo render.
  */
-export async function getSessionUser(): Promise<SessionUser | null> {
+export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   const driver = env.dbDriver();
 
   if (driver === 'supabase') {
@@ -69,7 +84,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   if (!user) return null;
 
   return { ...user, driver: 'local' };
-}
+});
 
 /**
  * Exige sessão. Redireciona para o login preservando o destino, para o usuário
