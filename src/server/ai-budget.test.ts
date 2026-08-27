@@ -356,6 +356,86 @@ describe('falhas e cota (SEM_CUSTO)', () => {
   });
 });
 
+describe('corrida de concorrência (TOCTOU)', () => {
+  /**
+   * O DEFEITO QUE ESTE TESTE COBRE: antes da correção, `countAiCalls` lia o
+   * uso e só bem depois — depois de `run()`, que é a chamada de rede e leva
+   * segundos — `recordAiCall` gravava. Um usuário disparando N Server Actions
+   * verdadeiramente em paralelo (`Promise.all`, uma entrada diferente por
+   * chamada para não cair no cache) fazia todas lerem a MESMA contagem, porque
+   * nenhuma tinha gravado ainda, e todas passavam — furando o teto
+   * proporcionalmente ao paralelismo.
+   *
+   * O atraso dentro de `run()` abaixo reproduz de propósito o "a chamada de
+   * IA leva um tempo" que a corrida explorava. Sem a reserva antes de rodar,
+   * as 10 chamadas veriam a contagem zerada ao mesmo tempo e as 10 passariam
+   * — este teste falha no código antigo (fica `sucesso === 10`, não `3`) e
+   * passa depois da correção.
+   */
+  it('N chamadas verdadeiramente paralelas do mesmo usuário não ultrapassam o teto', async () => {
+    process.env.AI_HOURLY_LIMIT = '3';
+    process.env.AI_DAILY_LIMIT = '1000';
+    const userId = randomUUID();
+    const total = 10;
+    let chamadasReais = 0;
+
+    const run = async () => {
+      chamadasReais += 1;
+      // A janela que o TOCTOU explorava: o tempo de uma chamada de IA de
+      // verdade, em que nenhuma gravação tinha acontecido ainda.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return envelope({ ok: true });
+    };
+
+    const resultados = await Promise.allSettled(
+      Array.from({ length: total }, (_, i) => runWithBudget(userId, 'reviewResume', { i }, run))
+    );
+
+    const sucesso = resultados.filter((resultado) => resultado.status === 'fulfilled').length;
+    const falhas = resultados.filter((resultado) => resultado.status === 'rejected').length;
+
+    for (const resultado of resultados) {
+      if (resultado.status === 'rejected') {
+        assert.ok(
+          resultado.reason instanceof AiError && resultado.reason.kind === 'cota',
+          'a chamada recusada devia ser por cota, não por outro erro'
+        );
+      }
+    }
+
+    assert.equal(sucesso, 3, `deveria deixar passar exatamente o limite (3); passaram ${sucesso}`);
+    assert.equal(falhas, total - 3);
+    assert.equal(
+      chamadasReais,
+      3,
+      'a tarefa de IA rodou mais vezes do que o limite permitia — a reserva não fechou a corrida'
+    );
+  });
+
+  it('o mesmo cenário, com o limite diário como o mais apertado, também não é furado', async () => {
+    process.env.AI_HOURLY_LIMIT = '1000';
+    process.env.AI_DAILY_LIMIT = '2';
+    const userId = randomUUID();
+    const total = 8;
+    let chamadasReais = 0;
+
+    const run = async () => {
+      chamadasReais += 1;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return envelope({ ok: true });
+    };
+
+    const resultados = await Promise.allSettled(
+      Array.from({ length: total }, (_, i) => runWithBudget(userId, 'reviewResume', { i }, run))
+    );
+
+    const sucesso = resultados.filter((resultado) => resultado.status === 'fulfilled').length;
+
+    assert.equal(sucesso, 2, `deveria deixar passar exatamente o limite diário (2); passaram ${sucesso}`);
+    assert.equal(chamadasReais, 2);
+  });
+});
+
 describe('modo demonstração', () => {
   it('pula cache e limite inteiramente — corre a tarefa sempre', async () => {
     process.env.AI_PROVIDER = 'demo';

@@ -124,6 +124,66 @@ describe('registro de chamadas de IA (driver local)', () => {
     );
   });
 
+  /**
+   * `deleteAiCall` desfaz UMA reserva por id — é o que fecha a corrida em
+   * `src/server/ai-budget.ts` (reserva antes de rodar a IA, apaga se a reserva
+   * não virar chamada de verdade). Filtra por dono pelo mesmo motivo de todo
+   * método deste contrato.
+   */
+  it('deleteAiCall apaga só o registro pedido, e só se for do dono', async () => {
+    const { id } = await localRepository.recordAiCall(ANA, {
+      task: 'reserva:reviewResume',
+      fingerprint: 'reserva-teste',
+      result: {},
+    });
+    const antes = await localRepository.countAiCalls(ANA, ONTEM);
+
+    // Bruno não pode apagar a reserva da Ana.
+    await localRepository.deleteAiCall(BRUNO, id);
+    assert.equal(await localRepository.countAiCalls(ANA, ONTEM), antes, 'um id de outro dono apagou o registro');
+
+    await localRepository.deleteAiCall(ANA, id);
+    assert.equal(await localRepository.countAiCalls(ANA, ONTEM), antes - 1);
+  });
+
+  /**
+   * `upTo` transforma a contagem em "posição na fila" — ver o comentário de
+   * topo de `src/server/ai-budget.ts`. O caso que mais importa é o de várias
+   * reservas caindo no MESMO milissegundo: `createdAt` sozinho não consegue
+   * distingui-las, e sem o desempate por `id` todas empatariam na mesma
+   * posição, furando o teto exatamente na rajada paralela que este parâmetro
+   * existe para conter.
+   */
+  it('upTo conta a posição na fila, com o id desempatando linhas do mesmo milissegundo', async () => {
+    const usuario = 'usuario-fila';
+    const desde = new Date(Date.now() - 60_000).toISOString();
+
+    const reservas = await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        localRepository.recordAiCall(usuario, {
+          task: 'reserva:teste',
+          fingerprint: `reserva-fila-${i}`,
+          result: {},
+        })
+      )
+    );
+
+    // Ordena pela mesma regra de posição que `countAiCalls` usa internamente:
+    // `createdAt` e, em caso de empate, `id`.
+    const ordenadas = [...reservas].sort((a, b) =>
+      a.createdAt !== b.createdAt ? a.createdAt.localeCompare(b.createdAt) : a.id.localeCompare(b.id)
+    );
+
+    for (let posicao = 0; posicao < ordenadas.length; posicao++) {
+      const contagem = await localRepository.countAiCalls(usuario, desde, ordenadas[posicao]);
+      assert.equal(
+        contagem,
+        posicao + 1,
+        `a reserva na posição ${posicao + 1} da fila deveria contar exatamente ${posicao + 1}`
+      );
+    }
+  });
+
   it('apaga os registros junto com a conta', async () => {
     await localRepository.recordAiCall('quem-vai-sair', { task: 't', fingerprint: 'zzz', result: {} });
     assert.equal(await localRepository.countAiCalls('quem-vai-sair', ONTEM), 1);

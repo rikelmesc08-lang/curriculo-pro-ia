@@ -54,9 +54,21 @@ export const localRepository: Repository = {
     });
   },
 
-  async countAiCalls(ownerId, since) {
-    return read(
-      (db) => db.aiCalls.filter((call) => call.ownerId === ownerId && call.createdAt >= since).length
+  async countAiCalls(ownerId, since, upTo) {
+    return read((db) =>
+      db.aiCalls.filter((call) => {
+        if (call.ownerId !== ownerId || call.createdAt < since) return false;
+        if (!upTo) return true;
+        // Posição na fila, não só janela de tempo: `createdAt` tem precisão
+        // de milissegundo, e várias reservas concorrentes podem cair no
+        // mesmo milissegundo. Sem o desempate por `id`, elas empatariam na
+        // mesma posição e mais de uma reserva se veria como "a 1ª da fila" —
+        // furando o teto exatamente no caso (rajada paralela) que este
+        // parâmetro existe para fechar.
+        if (call.createdAt < upTo.createdAt) return true;
+        if (call.createdAt > upTo.createdAt) return false;
+        return call.id <= upTo.id;
+      }).length
     );
   },
 
@@ -75,14 +87,16 @@ export const localRepository: Repository = {
   },
 
   async recordAiCall(ownerId, entry) {
+    const id = randomUUID();
+    const createdAt = now();
     await mutate((db) => {
       db.aiCalls.push({
-        id: randomUUID(),
+        id,
         ownerId,
         task: entry.task,
         fingerprint: entry.fingerprint,
         result: entry.result,
-        createdAt: now(),
+        createdAt,
       });
 
       // Poda no momento da escrita. Sem isto o db.json cresce para sempre com
@@ -90,6 +104,17 @@ export const localRepository: Repository = {
       // inteiro a cada operação.
       const cutoff = new Date(Date.now() - LOCAL_AI_RETENTION_MS).toISOString();
       db.aiCalls = db.aiCalls.filter((call) => call.createdAt >= cutoff);
+    });
+    // `createdAt` é gerado ANTES do `mutate` (não dentro dele) para ser
+    // exatamente o valor gravado na linha — devolvê-lo é o que permite ao
+    // chamador (`ai-budget.ts`) usar esta reserva como `upTo` de
+    // `countAiCalls`, isto é, como senha de fila.
+    return { id, createdAt };
+  },
+
+  async deleteAiCall(ownerId, id) {
+    await mutate((db) => {
+      db.aiCalls = db.aiCalls.filter((call) => !(call.id === id && call.ownerId === ownerId));
     });
   },
 
