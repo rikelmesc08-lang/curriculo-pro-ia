@@ -36,6 +36,7 @@ export async function createLocalUser(input: {
       plan: 'gratuito',
       passwordHash,
       createdAt: new Date().toISOString(),
+      sessionVersion: 0,
     };
     db.users.push(user);
     return { ok: true as const, user };
@@ -67,7 +68,7 @@ export async function authenticateLocalUser(input: {
   // errado, a pessoa entra com o hash antigo e tentamos de novo na próxima.
   if (precisaRehash(user.passwordHash)) {
     try {
-      await changeLocalPassword(user.id, input.password);
+      await rehashLocalPassword(user.id, input.password);
     } catch (error) {
       console.error('[authenticateLocalUser] falha ao migrar o hash', error);
     }
@@ -76,13 +77,77 @@ export async function authenticateLocalUser(input: {
   return { ok: true, user };
 }
 
-/** Troca a senha de um usuário local já autenticado. */
-export async function changeLocalPassword(userId: string, newPassword: string): Promise<boolean> {
-  const passwordHash = await hashPassword(newPassword);
+/**
+ * Regrava o hash com o custo atual, SEM verificar a senha de novo e SEM
+ * incrementar `sessionVersion`.
+ *
+ * Uso restrito à migração de custo dentro de `authenticateLocalUser`: ali a
+ * senha em texto já acabou de ser verificada pelo login, e o objetivo é só
+ * trocar o formato de armazenamento — não uma troca de senha de verdade. Se
+ * isto incrementasse `sessionVersion`, TODO LOGIN que disparasse a migração
+ * derrubaria as demais sessões do próprio usuário sem ele ter pedido.
+ */
+async function rehashLocalPassword(userId: string, password: string): Promise<boolean> {
+  const passwordHash = await hashPassword(password);
   return mutate((db) => {
     const user = db.users.find((candidate) => candidate.id === userId);
     if (!user) return false;
     user.passwordHash = passwordHash;
     return true;
   });
+}
+
+export type ChangeLocalPasswordResult =
+  | { ok: true; sessionVersion: number }
+  | { ok: false; reason: 'usuario-nao-encontrado' | 'senha-atual-incorreta' };
+
+/**
+ * Troca a senha de um usuário local já autenticado.
+ *
+ * Exige e confere a SENHA ATUAL antes de trocar — sem isto, quem obtém a
+ * sessão (dispositivo destravado, cookie roubado) trocaria a senha sem
+ * conhecer a antiga e trancaria o dono para fora. A comparação usa
+ * `verifyPassword`, a mesma função de tempo constante do login; não é uma
+ * segunda implementação.
+ *
+ * Sucesso incrementa `sessionVersion`: é o valor que `changePasswordAction`
+ * usa para emitir um cookie novo só para o navegador que pediu a troca,
+ * derrubando qualquer outro cookie em circulação no próximo pedido dele. Ver
+ * `readLocalSession`/`createLocalSessionValue` em `./session-cookie`.
+ */
+export async function changeLocalPassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<ChangeLocalPasswordResult> {
+  const user = await read((db) => db.users.find((candidate) => candidate.id === userId));
+  if (!user) return { ok: false, reason: 'usuario-nao-encontrado' };
+
+  const valid = await verifyPassword(currentPassword, user.passwordHash);
+  if (!valid) return { ok: false, reason: 'senha-atual-incorreta' };
+
+  const passwordHash = await hashPassword(newPassword);
+
+  const sessionVersion = await mutate((db) => {
+    const target = db.users.find((candidate) => candidate.id === userId);
+    // Não deveria acontecer entre a leitura acima e esta escrita (a fila do
+    // driver local serializa tudo), mas se a conta sumir no meio do caminho
+    // o retorno precisa refletir isso, não inventar uma versão.
+    if (!target) return null;
+    target.passwordHash = passwordHash;
+    target.sessionVersion = (target.sessionVersion ?? 0) + 1;
+    return target.sessionVersion;
+  });
+
+  if (sessionVersion === null) return { ok: false, reason: 'usuario-nao-encontrado' };
+  return { ok: true, sessionVersion };
+}
+
+/**
+ * Versão de sessão atual do usuário, para conferência contra o cookie.
+ * `null` quando o usuário não existe (mais) — cookie de conta apagada.
+ */
+export async function getLocalSessionVersion(userId: string): Promise<number | null> {
+  const user = await read((db) => db.users.find((candidate) => candidate.id === userId));
+  return user ? (user.sessionVersion ?? 0) : null;
 }

@@ -29,6 +29,13 @@ export function ProfileForm({ name }: { name: string }) {
   );
 }
 
+/**
+ * Troca de senha.
+ *
+ * Pede a senha ATUAL, conferida no servidor antes de qualquer troca — ver
+ * `changePasswordAction`. Sucesso derruba os outros dispositivos conectados
+ * e mantém esta sessão logada; o texto de sucesso avisa disso.
+ */
 export function PasswordForm() {
   const [state, action, pending] = useActionState(changePasswordAction, idleFormState);
 
@@ -36,6 +43,15 @@ export function PasswordForm() {
     <form action={action} className="space-y-4" noValidate>
       {state.status === 'error' && state.message && <Alert tone="danger">{state.message}</Alert>}
       {state.status === 'success' && state.message && <Alert tone="success">{state.message}</Alert>}
+
+      <TextField
+        label="Senha atual"
+        name="currentPassword"
+        type="password"
+        autoComplete="current-password"
+        required
+        error={state.fieldErrors?.currentPassword}
+      />
 
       <TextField
         label="Nova senha"

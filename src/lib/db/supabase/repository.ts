@@ -186,15 +186,37 @@ export function createSupabaseRepository(client: SupabaseClient): Repository {
       if (profile.error) fail('deleteUserData/profile', profile.error.message);
     },
 
-    async countAiCalls(ownerId, since) {
+    async countAiCalls(ownerId, since, upTo) {
       // `head: true` com `count: 'exact'`: o Postgres conta no servidor e não
       // devolve linha nenhuma. Trazer as linhas só para medir `.length` traria
       // junto todo o JSON das respostas guardadas.
-      const { count, error } = await client
+      let query = client
         .from('ai_calls')
         .select('id', { count: 'exact', head: true })
         .eq('owner_id', ownerId)
         .gte('created_at', since);
+
+      if (upTo) {
+        // Restringe a contagem à POSIÇÃO da reserva `upTo` na fila, não à
+        // janela inteira — é isto que transforma `recordAiCall` numa senha de
+        // fila (ver comentário de `src/server/ai-budget.ts`). Equivale a
+        // `(created_at, id) <= (upTo.createdAt, upTo.id)`, que o PostgREST não
+        // expressa como comparação de tupla direta; por isso o `.or()` com os
+        // dois ramos: "criado antes" OU "criado no mesmo instante E com id
+        // menor ou igual" (desempate necessário porque `created_at` só tem
+        // precisão de milissegundo).
+        //
+        // As aspas duplas em volta de `upTo.createdAt` são obrigatórias: o
+        // filtro `.or()` do PostgREST lê a string toda como uma lista de
+        // condições separadas por vírgula, e um timestamp ISO contém `:` e
+        // `+`/`-` (fuso horário) que, sem aspas, o parser tentaria interpretar
+        // como parte da sintaxe do operador em vez de como valor.
+        query = query.or(
+          `created_at.lt."${upTo.createdAt}",and(created_at.eq."${upTo.createdAt}",id.lte.${upTo.id})`
+        );
+      }
+
+      const { count, error } = await query;
       if (error) fail('countAiCalls', error.message);
       return count ?? 0;
     },
@@ -222,13 +244,26 @@ export function createSupabaseRepository(client: SupabaseClient): Repository {
     },
 
     async recordAiCall(ownerId, entry) {
-      const { error } = await client.from('ai_calls').insert({
-        owner_id: ownerId,
-        task: entry.task,
-        fingerprint: entry.fingerprint,
-        result: entry.result,
-      });
+      const { data, error } = await client
+        .from('ai_calls')
+        .insert({
+          owner_id: ownerId,
+          task: entry.task,
+          fingerprint: entry.fingerprint,
+          result: entry.result,
+        })
+        // `created_at` junto com `id`: é a dupla que `ai-budget.ts` devolve a
+        // esta camada como `upTo` de `countAiCalls`, para a reserva contar só
+        // até a própria posição na fila — não o `id` sozinho.
+        .select('id, created_at')
+        .single<{ id: string; created_at: string }>();
       if (error) fail('recordAiCall', error.message);
+      return { id: data.id, createdAt: data.created_at };
+    },
+
+    async deleteAiCall(ownerId, id) {
+      const { error } = await client.from('ai_calls').delete().eq('owner_id', ownerId).eq('id', id);
+      if (error) fail('deleteAiCall', error.message);
     },
 
     async listResumes(ownerId) {

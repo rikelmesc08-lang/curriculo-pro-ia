@@ -31,6 +31,18 @@ export interface StoredUser {
   /** `scrypt` com sal por usuário. Ver `src/lib/auth/password.ts`. */
   passwordHash: string;
   createdAt: string;
+  /**
+   * Incrementada a cada troca de senha bem-sucedida. Fica embutida no cookie
+   * de sessão (`src/lib/auth/session-cookie.ts`); quando o valor do cookie
+   * não bate com o valor gravado aqui, a sessão é tratada como encerrada.
+   *
+   * É o que permite "trocar a senha derruba os OUTROS dispositivos": ao
+   * trocar, o número sobe e um cookie novo é emitido só para o navegador que
+   * pediu a troca — qualquer outro cookie, emitido com o número antigo, para
+   * de validar no próximo pedido. Ausente (`undefined`) em registros gravados
+   * antes deste campo existir; tratado como `0`.
+   */
+  sessionVersion?: number;
 }
 
 export interface DatabaseShape {
