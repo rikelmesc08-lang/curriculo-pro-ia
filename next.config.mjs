@@ -89,47 +89,45 @@ const nextConfig = {
    * celular passa disso sem esforço.
    *
    * O NÚMERO AQUI FICA ENTRE O NOSSO TETO E O DA BORDA QUE RECEBE A
-   * REQUISIÇÃO. `MAX_UPLOAD_BYTES` (em `src/lib/files/limits.ts`) é 4 MB, e
-   * este 4,4 MB fica acima dele de propósito: assim, quem recusa um arquivo
+   * REQUISIÇÃO. `MAX_UPLOAD_BYTES` (em `src/lib/files/limits.ts`) é 8 MB, e
+   * este 8,5 MB fica acima dele de propósito: assim, quem recusa um arquivo
    * grande demais é a NOSSA validação — que explica o que fazer — e não o
-   * Next com um erro genérico de corpo excedido.
+   * Next com um erro genérico de corpo excedido. A folga de meio megabyte é o
+   * que cobre o envelope do `multipart/form-data`, que este campo mede junto
+   * com o arquivo e a nossa validação não.
    *
    * QUEM CORTA NA OUTRA PONTA MUDOU COM O SERVIDOR PRÓPRIO, E ISSO IMPORTA.
    * Na Vercel, a borda da própria plataforma cortava o corpo da requisição em
-   * ~4,5 MB antes de o Next sequer ser chamado — por isso o 4,4 MB deste
-   * campo sempre coube dentro do que chegava. Num servidor próprio (VPS na
-   * Hostinger) quem fica na frente do Next é um proxy reverso — Nginx, no
-   * caminho documentado deste projeto — e o Nginx tem TETO PRÓPRIO, `client_
-   * max_body_size`, cujo PADRÃO DE FÁBRICA É 1 MB.
+   * ~4,5 MB antes de o Next sequer ser chamado — por isso este campo esteve
+   * em 4,4 MB por muito tempo. Num servidor próprio quem fica na frente do
+   * Next é um proxy reverso, e um Nginx tem teto próprio, `client_max_body_
+   * size`, cujo PADRÃO DE FÁBRICA É 1 MB. Com esse padrão valendo, uma foto de
+   * 2–4 MB receberia 413 do proxy antes de chegar ao Next e antes de qualquer
+   * mensagem nossa — o mesmo sintoma do defeito antigo da Vercel (erro de rede
+   * sem explicação), só que com a causa fora deste repositório.
    *
-   * ISSO É UMA ARMADILHA REAL, não teórica: com Nginx no padrão, uma foto de
-   * 2–4 MB (o caso de uso que este limite existe para atender — ver o
-   * histórico em `src/lib/files/limits.ts`) recebe 413 Request Entity Too
-   * Large do Nginx, antes de chegar ao Next e antes de qualquer mensagem
-   * nossa aparecer. O sintoma bate exatamente com o defeito antigo da Vercel
-   * que este arquivo já teve de corrigir — erro de rede sem explicação —, só
-   * que a causa agora está na configuração do servidor, não neste número.
+   * ESSE RISCO FOI MEDIDO, E NÃO SE CONFIRMA NESTE HOST. Em 28/08/2026 a
+   * produção (`curriculoproia.online`, Web App Node.js da Hostinger) recebeu
+   * POSTs de 1, 2, 3, 4, 5, 6, 8, 12 e 20 MB: todas as nove respostas foram o
+   * 413 emitido pelo NOSSO código, nenhuma um 413 de proxy. 20 MB atravessam a
+   * borda inteiros, então o `client_max_body_size` deste host não está no
+   * padrão de fábrica. É o que libera o 8,5 MB deste campo.
    *
-   * `client_max_body_size` do Nginx PRECISA ficar em pelo menos 4,4 MB nos
-   * hosts (`server`/`location`) que servem `/app/curriculo/importar` e
-   * quaisquer outras rotas de upload deste projeto — ideal um pouco acima,
-   * pelo mesmo raciocínio de folga que já vale entre `MAX_UPLOAD_BYTES` e
-   * este campo. Isto não é validado por teste nenhum deste repositório
-   * porque vive fora dele, na configuração do proxy do VPS; documentar aqui é
-   * a defesa possível contra o esquecimento.
+   * O QUE REFAZER SE A HOSPEDAGEM MUDAR: repetir a medida antes de confiar no
+   * número. Um `curl -X POST` com corpo de 12 MB contra qualquer rota da API é
+   * suficiente — se voltar um 413 que não seja JSON nosso, o corte é do proxy,
+   * e aí `client_max_body_size` precisa subir para pelo menos 8,5 MB nos
+   * `server`/`location` que servem `/app/curriculo/importar`. Nenhum teste
+   * deste repositório cobre isso, porque vive fora dele.
    *
-   * O NÚMERO 4,4 MB EM SI NÃO MUDOU E NÃO PRECISA MUDAR: ele já ficava entre
-   * `MAX_UPLOAD_BYTES` (4 MB) e qualquer corte de borda razoável — só o motivo
-   * documentado do lado de fora mudou de plataforma para proxy.
-   *
-   * Já esteve em 10mb, o que era ficção: anunciava internamente o dobro do que
-   * a Vercel jamais entregava — o mesmo tipo de erro que um Nginx mal
-   * configurado reintroduziria hoje, só que na direção contrária (proxy corta
-   * menos do que anunciamos suportar).
+   * Já esteve em 10mb quando a Vercel entregava 4,5 MB, o que era ficção:
+   * anunciava internamente o dobro do que chegava. A diferença entre aquele
+   * 10mb e este 8,5mb não é o tamanho — é que este foi medido contra a borda
+   * que está de fato no caminho.
    */
   experimental: {
     serverActions: {
-      bodySizeLimit: '4.4mb',
+      bodySizeLimit: '8.5mb',
     },
   },
 
