@@ -123,7 +123,55 @@ interface GeminiResponse {
     finishReason?: string;
   }[];
   promptFeedback?: { blockReason?: string };
-  error?: { code?: number; status?: string; message?: string };
+  /**
+   * `details` entra aqui porque é ONDE O GOOGLE DIZ QUAL COTA ESTOUROU, e a
+   * diferença muda o que a pessoa deve fazer. Um 429 pode ser "muitas chamadas
+   * neste minuto" (espera segundos) ou "acabou a cota do DIA" (só amanhã). A
+   * `message` não distingue os dois; o `quotaId` dentro de
+   * `QuotaFailure.violations` distingue.
+   */
+  error?: {
+    code?: number;
+    status?: string;
+    message?: string;
+    details?: {
+      '@type'?: string;
+      retryDelay?: string;
+      violations?: { quotaId?: string; quotaValue?: string }[];
+    }[];
+  };
+}
+
+/**
+ * O que o Google contou sobre a cota estourada, se contou.
+ *
+ * `null` significa "ele não disse", e é um estado distinto de "não é diária".
+ * Sem essa distinção o código promete uma espera curta para uma cota que pode
+ * ser a do dia — o mesmo defeito que esta mudança existe para consertar, só que
+ * escondido um nível abaixo.
+ */
+interface DetalheDeCota {
+  /** A cota é por dia? Se for, "tente daqui a pouco" é conselho falso. */
+  porDia: boolean;
+  /** Quantas chamadas o plano permite nessa janela, quando informado. */
+  limite?: string;
+}
+
+/**
+ * Lê o motivo do 429.
+ *
+ * DEFENSIVO DE PROPÓSITO: é corpo de erro de terceiro, o formato pode mudar sem
+ * aviso, e uma exceção aqui trocaria uma mensagem ruim por uma tela quebrada.
+ * Qualquer coisa fora do esperado vira "não sei qual cota", que é o caso em que
+ * a mensagem genérica assume.
+ */
+function detalheDeCota(body: GeminiResponse): DetalheDeCota | null {
+  const violacao = body.error?.details
+    ?.flatMap((detalhe) => detalhe.violations ?? [])
+    .find((v) => typeof v.quotaId === 'string' && v.quotaId.length > 0);
+
+  if (!violacao?.quotaId) return null;
+  return { porDia: /perday/i.test(violacao.quotaId), limite: violacao.quotaValue };
 }
 
 function apiKey(): string {
@@ -155,7 +203,41 @@ function errorFromStatus(status: number, body: GeminiResponse, task: string): Ai
     return new AiError('configuracao', task, `Acesso negado pela API do Gemini: ${message}`);
   }
   if (status === 429) {
-    return new AiError('limite', task, 'Cota da API do Gemini atingida.');
+    /**
+     * "TENTE DE NOVO EM ALGUNS MINUTOS" É FALSO QUANDO A COTA É DIÁRIA, e essa
+     * é a que estoura de verdade neste produto: o nível gratuito do Gemini
+     * permite 20 chamadas POR DIA no projeto inteiro — não por usuário. Uma
+     * mensagem pedindo para esperar alguns minutos deixa a pessoa clicando
+     * durante horas contra um limite que só zera no dia seguinte.
+     *
+     * A distinção sai do `quotaId` que o Google manda em `details`; quando ele
+     * não vem, cai na genérica, que também não promete prazo.
+     */
+    const cota = detalheDeCota(body);
+
+    // Sem `details`, NÃO sabemos qual janela estourou — e aí nenhuma promessa
+    // de prazo é honesta. Fica sem `friendly`, e quem responde é a mensagem
+    // genérica de `provider.ts`, que também não promete prazo.
+    if (!cota) {
+      return new AiError('limite', task, `Cota da API do Gemini atingida: ${message}`);
+    }
+
+    if (cota.porDia) {
+      const quantas = cota.limite ? `${cota.limite} análises por dia` : 'um limite diário';
+      return new AiError(
+        'limite',
+        task,
+        `Cota DIÁRIA da API do Gemini atingida (${cota.limite ?? '?'}/dia): ${message}`,
+        `O site atingiu ${quantas} de uso da IA e a cota só volta amanhã — tentar de novo hoje não vai adiantar. Seu currículo continua salvo, e nada do que você escreveu se perdeu.`
+      );
+    }
+
+    return new AiError(
+      'limite',
+      task,
+      `Cota da API do Gemini atingida: ${message}`,
+      'Muitas análises ao mesmo tempo neste momento. Espere um instante e tente de novo — seus dados continuam salvos.'
+    );
   }
   if (status === 404) {
     // Modelo aposentado ou nome errado em GEMINI_MODEL. Sem este caso, cai no
@@ -309,8 +391,23 @@ async function callModel(
       aborted
         ? `Sem resposta do Gemini dentro do prazo de ${TOTAL_BUDGET_MS / 1000}s da tarefa.`
         : ((error as Error).message ?? 'Falha na chamada.'),
+      /**
+       * A SAÍDA DEPENDE DE COMO A PESSOA ENVIOU, e a mensagem antiga era a
+       * mesma para os dois casos: "reduza o tamanho do texto colado". Quem
+       * mandou um PDF não colou texto nenhum — o conselho não se aplicava, e
+       * pior, escondia justamente o que resolve.
+       *
+       * Ler um PDF é a tarefa mais cara deste produto: o documento inteiro
+       * viaja junto do prompt e o modelo percorre página por página. Medido em
+       * 28/08/2026, no mesmo instante e com o mesmo currículo, o PDF levou
+       * 74,3s e o MESMO conteúdo colado como texto levou 7,5s — dez vezes mais
+       * rápido, dentro do prazo com folga. Quando a leitura de arquivo estoura,
+       * colar o texto não é um consolo: é o caminho que funciona.
+       */
       aborted
-        ? 'A IA demorou mais do que o limite desta tela. Tente de novo — se persistir, reduza o tamanho do texto colado.'
+        ? task.attachment
+          ? 'A leitura do arquivo passou do tempo limite desta tela. Tente colar o texto do currículo na outra aba — ler texto é bem mais rápido que ler um PDF, e costuma passar de primeira.'
+          : 'A IA demorou mais do que o limite desta tela. Tente de novo — se persistir, reduza o tamanho do texto colado.'
         : undefined
     );
   }

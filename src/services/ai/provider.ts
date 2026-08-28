@@ -119,8 +119,16 @@ export class AiError extends Error {
     switch (this.kind) {
       case 'configuracao':
         return 'A IA não está configurada neste ambiente. Confira a chave de API nas variáveis de ambiente.';
+      /**
+       * NÃO PROMETE PRAZO, e isso é deliberado. Esta é a mensagem de recuo,
+       * usada quando o provedor não disse QUAL cota estourou. Pode ser a do
+       * minuto (libera em segundos) ou a do dia (só amanhã) — e "tente em
+       * alguns minutos", que era o texto antigo, é falso na segunda e deixa a
+       * pessoa clicando por horas. Quando o provedor informa a janela, quem
+       * responde é a mensagem específica montada em `gemini.ts`.
+       */
       case 'limite':
-        return 'A IA atingiu o limite de uso no momento. Tente de novo em alguns minutos.';
+        return 'A IA atingiu o limite de uso do site. Isso libera sozinho, mas pode levar de minutos a algumas horas — seus dados continuam salvos.';
       case 'bloqueio':
         return 'Os filtros de conteúdo da IA recusaram este texto. Revise o que foi colado e tente de novo.';
       case 'cota':
