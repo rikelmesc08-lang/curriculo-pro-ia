@@ -79,9 +79,15 @@ export default async function ResumeBuilderPage({ searchParams }: PageProps<'/ap
 
         Não some depois de editar, e não deveria: o formulário salva sozinho, e
         a pessoa pode ir e voltar quantas vezes quiser.
+
+        O TÍTULO NÃO INTERPOLA O NOME DA FERRAMENTA, e isso é deliberado.
+        Metade dos rótulos não é verbo: "antes de analisar currículo" lê bem,
+        mas "antes de carta de apresentação" e "antes de mensagem para
+        recrutador" não são português. O nome da ferramenta aparece onde cabe
+        naturalmente — no botão ("Voltar para Carta de apresentação").
       */}
       {volta && (
-        <Alert tone="info" title={`Confira o que foi lido antes de ${volta.label.toLowerCase()}`} className="mb-5">
+        <Alert tone="info" title="Confira o que foi lido antes de continuar" className="mb-5">
           <p>
             Os dados abaixo vieram do arquivo que você enviou, e a leitura automática erra — junta
             colunas, troca datas, deixa campo em branco. Corrija o que estiver errado; o formulário

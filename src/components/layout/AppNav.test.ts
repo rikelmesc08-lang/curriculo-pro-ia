@@ -166,6 +166,15 @@ describe('as páginas e a lista não saem de sincronia', () => {
     // pessoa clica logo depois de importar o currículo.
     assert.match(fonte, /rotaDeRetorno\(params\.voltar\)/, 'o formulário não valida o ?voltar=');
     assert.match(fonte, /Voltar para \{volta\.label\}/, 'sumiu o botão de volta');
+
+    // O rótulo entra no BOTÃO, nunca numa frase que exija que ele seja verbo.
+    // "antes de analisar currículo" lê bem; "antes de carta de apresentação"
+    // não é português — e três dos seis rótulos são substantivos.
+    assert.doesNotMatch(
+      fonte,
+      /title=\{`[^`]*\$\{volta\.label/,
+      'o título do aviso voltou a interpolar o rótulo; metade deles não é verbo'
+    );
     assert.doesNotMatch(
       fonte,
       /href=\{params\.voltar/,
