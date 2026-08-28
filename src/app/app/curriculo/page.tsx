@@ -85,8 +85,16 @@ export default async function ResumeBuilderPage({ searchParams }: PageProps<'/ap
         mas "antes de carta de apresentação" e "antes de mensagem para
         recrutador" não são português. O nome da ferramenta aparece onde cabe
         naturalmente — no botão ("Voltar para Carta de apresentação").
+
+        E EXIGE `existing`, não só `volta`. O texto afirma que os dados vieram
+        de um arquivo enviado; sem currículo salvo, essa afirmação é falsa.
+        No fluxo real as duas condições andam juntas — a pessoa chega aqui logo
+        depois de importar —, mas basta abrir a URL com `?voltar=` na mão para
+        a mensagem mentir. Sem esta condição, o aviso ainda aparecia ao lado do
+        "Já tem um currículo pronto?", que só existe quando NÃO há currículo:
+        duas caixas dizendo o contrário uma da outra na mesma tela.
       */}
-      {volta && (
+      {volta && existing && (
         <Alert tone="info" title="Confira o que foi lido antes de continuar" className="mb-5">
           <p>
             Os dados abaixo vieram do arquivo que você enviou, e a leitura automática erra — junta
