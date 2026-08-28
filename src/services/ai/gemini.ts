@@ -72,6 +72,39 @@ function outputBudget(maxTokens: number): number {
   return Math.min(Math.max(maxTokens * 2, 1024), 8192);
 }
 
+/**
+ * Modelos que já recusaram o controle de raciocínio.
+ *
+ * `GEMINI_MODEL` é configurável, e `thinkingConfig` é recente: um modelo mais
+ * antigo devolve 400 para ele. Sem esta trava, trocar o modelo por um que não
+ * conheça o campo quebraria TODA importação de currículo — uma preferência de
+ * desempenho derrubando uma funcionalidade inteira, que é a pior troca
+ * possível. Na primeira recusa o campo sai do caminho e o processo segue com o
+ * comportamento de antes: mais lento, e funcionando.
+ *
+ * É UM CONJUNTO POR MODELO, e não um booleano do processo. Com um booleano, um
+ * modelo antigo recusando uma vez condenaria também o modelo NOVO para o qual
+ * `GEMINI_MODEL` viesse a apontar depois — a otimização ficaria desligada para
+ * sempre, em silêncio, sem nada no log indicando por quê.
+ */
+const raciocinioRecusadoPor = new Set<string>();
+
+/**
+ * O `thinkingConfig` desta tarefa, se ela pediu e o modelo aceitar.
+ *
+ * `thinkingLevel: 'low'`, e não um orçamento em tokens: medido em 28/08/2026,
+ * `'low'` zerou os tokens de pensamento (20,1s → 6,0s) enquanto
+ * `thinkingBudget: 128` ainda gastou 888 tokens e 8,4s, e `thinkingBudget: 0`
+ * foi recusado com 400. `'low'` também deixa margem para o modelo pensar um
+ * pouco quando a entrada é de fato difícil — uma FOTO torta de currículo
+ * impresso, por exemplo, que é caso de uso real e não foi medido aqui.
+ */
+function thinkingConfigDe(task: AiTask<unknown>): Record<string, unknown> | undefined {
+  if (task.reasoning !== 'minimal') return undefined;
+  if (raciocinioRecusadoPor.has(env.geminiModel())) return undefined;
+  return { thinkingLevel: 'low' };
+}
+
 interface GeminiPart {
   text?: string;
   /**
@@ -235,6 +268,8 @@ async function callModel(
     });
   }
 
+  const thinking = thinkingConfigDe(task);
+
   let response: Response;
   try {
     response = await fetch(`${ENDPOINT}/${env.geminiModel()}:generateContent`, {
@@ -257,6 +292,9 @@ async function callModel(
           // O modelo já devolve JSON puro. `extractJson` continua no caminho
           // como rede de segurança, não como expectativa.
           responseMimeType: 'application/json',
+          // Só aparece para tarefa de transcrição, e some sozinho se o modelo
+          // recusar — ver `thinkingConfigDe`.
+          ...(thinking ? { thinkingConfig: thinking } : {}),
         },
       }),
       // O sinal usa o que RESTA do prazo da tarefa, não um valor fixo.
@@ -285,6 +323,27 @@ async function callModel(
   }
 
   if (!response.ok) {
+    /**
+     * 400 numa requisição que levava `thinkingConfig`: o modelo não conhece o
+     * campo. Tira do caminho e tenta de novo, UMA vez, antes de qualquer erro
+     * chegar à tela.
+     *
+     * A detecção é por "nós enviamos o campo e a requisição foi recusada", e
+     * não pela mensagem: a recusa medida veio como "Request contains an invalid
+     * argument", sem citar raciocínio nenhum — procurar a palavra no texto
+     * deixaria passar. Não recursiona sem fim porque `raciocinioRecusado` já
+     * está marcado quando a segunda tentativa monta o corpo.
+     */
+    if (thinking && response.status === 400 && restante(prazo) > MIN_TENTATIVA_MS) {
+      const modelo = env.geminiModel();
+      raciocinioRecusadoPor.add(modelo);
+      console.error(
+        `[gemini] modelo "${modelo}" recusou thinkingConfig; seguindo sem ele (mais lento). ` +
+          `Resposta: ${body.error?.message ?? 'sem mensagem'}`
+      );
+      return callModel(task, prazo, correction, jaRepetiu);
+    }
+
     const erro = errorFromStatus(response.status, body, task.name);
 
     // "This model is currently experiencing high demand" é a resposta padrão do

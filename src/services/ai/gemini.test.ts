@@ -74,6 +74,11 @@ afterEach(() => {
   globalThis.fetch = fetchOriginal;
   delete process.env.GEMINI_API_KEY;
   delete process.env.AI_PROVIDER;
+  // Os testes de thinkingConfig definem um modelo por caso. Sem esta limpeza, o
+  // nome vazaria para os testes seguintes — e o conjunto de "modelos que
+  // recusaram" é por NOME, então um vazamento faria um teste desligar a
+  // otimização de outro, com falha que só aparece na ordem de execução.
+  delete process.env.GEMINI_MODEL;
 });
 
 describe('geminiProvider', () => {
@@ -198,5 +203,90 @@ describe('extractJson', () => {
   it('devolve null em vez de lançar quando não há objeto', () => {
     assert.equal(extractJson('sem objeto nenhum'), null);
     assert.equal(extractJson('{quebrado'), null);
+  });
+});
+
+/**
+ * Controle de raciocínio.
+ *
+ * Cada teste usa um `GEMINI_MODEL` PRÓPRIO porque a memória de "este modelo
+ * recusou o campo" é por modelo e vive enquanto o processo viver: dois testes
+ * no mesmo nome de modelo se contaminariam pela ordem de execução, e o teste do
+ * recuo apagaria o do caminho feliz.
+ */
+describe('thinkingConfig', () => {
+  function corpoDe(indice: number): Record<string, unknown> {
+    return JSON.parse(String(chamadas[indice].init.body)) as Record<string, unknown>;
+  }
+  function generationConfigDe(indice: number): Record<string, unknown> {
+    return corpoDe(indice).generationConfig as Record<string, unknown>;
+  }
+
+  it('tarefa comum não manda thinkingConfig — o padrão é o modelo pensar', async () => {
+    process.env.GEMINI_MODEL = 'modelo-comum';
+    mockFetch(respostaComTexto('{"ok": true}'));
+    await geminiProvider.run(tarefa());
+
+    assert.equal(
+      generationConfigDe(0).thinkingConfig,
+      undefined,
+      'sem pedido explícito, nada pode ser mexido no raciocínio'
+    );
+  });
+
+  it("tarefa de transcrição manda thinkingLevel 'low'", async () => {
+    process.env.GEMINI_MODEL = 'modelo-que-aceita';
+    mockFetch(respostaComTexto('{"ok": true}'));
+    await geminiProvider.run({ ...tarefa(), reasoning: 'minimal' });
+
+    assert.deepEqual(generationConfigDe(0).thinkingConfig, { thinkingLevel: 'low' });
+  });
+
+  it('modelo que recusa o campo com 400 recebe a mesma tarefa sem ele, e ela funciona', async () => {
+    process.env.GEMINI_MODEL = 'modelo-antigo';
+    // Primeira resposta: 400 sem citar raciocínio nenhum — foi exatamente a
+    // recusa medida contra a API real ("Request contains an invalid argument").
+    mockFetch(
+      respostaDeErro(400, 'Request contains an invalid argument.'),
+      respostaComTexto('{"ok": true}')
+    );
+
+    const resultado = await geminiProvider.run({ ...tarefa(), reasoning: 'minimal' });
+
+    // O que importa: a pessoa recebeu o resultado. Uma preferência de
+    // desempenho não pode derrubar a funcionalidade.
+    assert.deepEqual(resultado, { ok: true });
+    assert.equal(chamadas.length, 2, 'devia ter tentado de novo, sem o campo');
+    assert.deepEqual(generationConfigDe(0).thinkingConfig, { thinkingLevel: 'low' });
+    assert.equal(generationConfigDe(1).thinkingConfig, undefined, 'a repetição ainda mandou o campo');
+  });
+
+  it('depois de recusado, o mesmo modelo não tenta de novo na chamada seguinte', async () => {
+    process.env.GEMINI_MODEL = 'modelo-teimoso';
+    mockFetch(respostaDeErro(400, 'Request contains an invalid argument.'), respostaComTexto('{"ok": true}'));
+    await geminiProvider.run({ ...tarefa(), reasoning: 'minimal' });
+
+    chamadas = [];
+    mockFetch(respostaComTexto('{"ok": true}'));
+    await geminiProvider.run({ ...tarefa(), reasoning: 'minimal' });
+
+    assert.equal(chamadas.length, 1, 'insistir custaria um 400 por chamada, para sempre');
+    assert.equal(generationConfigDe(0).thinkingConfig, undefined);
+  });
+
+  it('a recusa de um modelo não condena outro', async () => {
+    process.env.GEMINI_MODEL = 'modelo-que-recusa';
+    mockFetch(respostaDeErro(400, 'Request contains an invalid argument.'), respostaComTexto('{"ok": true}'));
+    await geminiProvider.run({ ...tarefa(), reasoning: 'minimal' });
+
+    // Trocar GEMINI_MODEL para um modelo novo precisa reabilitar a otimização.
+    // Com um booleano por processo, ela ficaria desligada para sempre e em
+    // silêncio — o defeito que o conjunto por modelo existe para impedir.
+    process.env.GEMINI_MODEL = 'modelo-novo-em-folha';
+    chamadas = [];
+    mockFetch(respostaComTexto('{"ok": true}'));
+    await geminiProvider.run({ ...tarefa(), reasoning: 'minimal' });
+
+    assert.deepEqual(generationConfigDe(0).thinkingConfig, { thinkingLevel: 'low' });
   });
 });
