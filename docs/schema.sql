@@ -253,6 +253,107 @@ grant select, insert, delete on public.ai_calls to authenticated;
 
 
 -- ---------------------------------------------------------------------------
+-- RESERVA DE COTA DE IA NUM STATEMENT SÓ
+--
+-- `runWithBudget` (src/server/ai-budget.ts) grava uma reserva em `ai_calls`
+-- antes de chamar a IA e pergunta qual é a POSIÇÃO dela na fila da janela. Se
+-- o INSERT e as contagens vão ao banco separados, em READ COMMITTED (o padrão)
+-- o SELECT de uma transação não enxerga a linha que outra ainda não commitou:
+-- N requisições paralelas do mesmo usuário se acham todas a 1ª da fila e todas
+-- passam, furando o teto de 15/hora e 40/dia. O prejuízo é custo de API real.
+--
+-- Esta função junta o INSERT e as duas contagens numa transação só e, antes de
+-- tudo, pega uma trava POR USUÁRIO. A trava é o que fecha a corrida: a segunda
+-- requisição do mesmo usuário espera a primeira commitar, e quando conta já
+-- enxerga a linha dela. As posições saem 1, 2, 3… sem empate e sem buraco.
+--
+-- `pg_advisory_xact_lock` porque ela é solta sozinha no fim da transação,
+-- inclusive em rollback — não existe caminho em que vaze e trave o usuário
+-- para sempre. E é por `owner_id`, não global: dois usuários só se esbarram se
+-- os hashes colidirem, e o custo disso é uma espera de milissegundos.
+--
+-- SECURITY INVOKER, DE PROPÓSITO. A função recebe `p_owner_id` como parâmetro.
+-- Como `security definer`, esse parâmetro viraria um jeito de qualquer usuário
+-- logado gravar linha no nome de outra pessoa e queimar a cota alheia. Como
+-- invoker, ela roda com os poderes de quem chama e as policies de `ai_calls`
+-- acima continuam valendo dentro dela — o INSERT com `owner_id` de terceiro é
+-- recusado por "ia: registrar para si". NÃO troque para definer sem
+-- acrescentar uma checagem explícita de `auth.uid() = p_owner_id`.
+--
+-- Os nomes de saída são `reserva_*`, e não `id`/`created_at`, porque num
+-- `returns table` eles viram variáveis no corpo e sombreariam as colunas
+-- homônimas de `ai_calls`.
+-- ---------------------------------------------------------------------------
+
+create or replace function public.reservar_chamada_ia(
+  p_owner_id uuid,
+  p_task text,
+  p_fingerprint text,
+  p_desde_hora timestamptz,
+  p_desde_dia timestamptz
+)
+returns table (
+  reserva_id uuid,
+  reserva_criada_em timestamptz,
+  posicao_hora bigint,
+  posicao_dia bigint
+)
+language plpgsql
+volatile
+security invoker
+-- `search_path` fixo: sem isto, um `search_path` hostil na sessão poderia
+-- fazer `ai_calls` resolver para outra tabela. `pg_temp` por último, nunca
+-- primeiro, para uma tabela temporária não sequestrar o nome.
+set search_path = public, pg_temp
+as $$
+declare
+  v_id uuid;
+  v_criada_em timestamptz;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(p_owner_id::text, 0));
+
+  insert into public.ai_calls (owner_id, task, fingerprint, result)
+  values (p_owner_id, p_task, p_fingerprint, '{}'::jsonb)
+  returning ai_calls.id, ai_calls.created_at
+  into v_id, v_criada_em;
+
+  -- Contagem simples, sem comparar `(created_at, id)` — é a trava acima que
+  -- torna isso correto. Comparar a tupla NÃO ordena por inserção: `created_at`
+  -- tem precisão de milissegundo e o `id` é um UUID aleatório, então duas
+  -- reservas no mesmo instante saem na ordem do sorteio e podem empatar de
+  -- posição, furando o teto. Com a trava não há o que desempatar: nenhuma
+  -- outra reserva deste usuário entra entre o INSERT e os SELECTs, e todas as
+  -- anteriores já commitaram, então "quantas existem na janela" já É a posição.
+  return query
+  select
+    v_id,
+    v_criada_em,
+    (
+      select count(*)
+      from public.ai_calls c
+      where c.owner_id = p_owner_id
+        and c.created_at >= p_desde_hora
+    ),
+    (
+      select count(*)
+      from public.ai_calls c
+      where c.owner_id = p_owner_id
+        and c.created_at >= p_desde_dia
+    );
+end;
+$$;
+
+-- O Postgres concede EXECUTE ao pseudo-papel `public` em toda função nova; sem
+-- o revoke, o grant seletivo abaixo não restringiria nada. `anon` fica de fora
+-- porque nenhuma tela deste produto chama IA sem login.
+revoke all on function public.reservar_chamada_ia(uuid, text, text, timestamptz, timestamptz) from public;
+revoke all on function public.reservar_chamada_ia(uuid, text, text, timestamptz, timestamptz) from anon;
+
+grant execute on function public.reservar_chamada_ia(uuid, text, text, timestamptz, timestamptz) to authenticated;
+grant execute on function public.reservar_chamada_ia(uuid, text, text, timestamptz, timestamptz) to service_role;
+
+
+-- ---------------------------------------------------------------------------
 -- COBRANÇA
 --
 -- Três coisas acontecem neste bloco, e a primeira é uma CORREÇÃO DE SEGURANÇA

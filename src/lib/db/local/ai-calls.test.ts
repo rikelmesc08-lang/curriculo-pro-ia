@@ -199,3 +199,95 @@ describe('registro de chamadas de IA (driver local)', () => {
     assert.equal(await localRepository.countAiCalls(ANA, ONTEM), 5);
   });
 });
+
+/**
+ * `reserveAiCall` — reserva e as duas posições de uma vez só.
+ *
+ * O que estes testes protegem NÃO é o driver local, que já era seguro: o
+ * arquivo é acessado por uma fila única que serializa tudo. É o CONTRATO que o
+ * driver Supabase precisa cumprir com a função de banco
+ * (`docs/migrations/2026-08-28-reserva-atomica-ia.sql`). Se a semântica de
+ * posição divergir entre os dois drivers, o mesmo usuário recebe um teto num
+ * banco e outro no outro — e a diferença só apareceria em produção, sob
+ * rajada.
+ */
+describe('reserveAiCall', () => {
+  const JANELA = { desdeHora: UMA_HORA_ATRAS, desdeDia: ONTEM };
+
+  it('N reservas paralelas recebem as posições 1..N, sem empate e sem buraco', async () => {
+    const usuario = `reserva-paralela-${Date.now()}`;
+    const total = 10;
+
+    const reservas = await Promise.all(
+      Array.from({ length: total }, () =>
+        localRepository.reserveAiCall(usuario, { task: 'reviewResume', fingerprint: 'x' }, JANELA)
+      )
+    );
+
+    // Empate de posição é o defeito exato que fura o teto: duas reservas que se
+    // veem como "a 1ª da fila" passam as duas quando só uma tinha direito.
+    const posicoes = reservas.map((reserva) => reserva?.usedInHour).sort((a, b) => a! - b!);
+    assert.deepEqual(
+      posicoes,
+      Array.from({ length: total }, (_, i) => i + 1),
+      `as posições deveriam ser 1..${total} sem repetição; vieram ${posicoes.join(', ')}`
+    );
+
+    // Ids distintos: a posição só é confiável se cada reserva for uma linha.
+    assert.equal(new Set(reservas.map((reserva) => reserva?.id)).size, total);
+  });
+
+  it('reservas em sequência recebem 1, 2, 3…', async () => {
+    const usuario = `reserva-sequencia-${Date.now()}`;
+
+    for (let esperada = 1; esperada <= 3; esperada++) {
+      const reserva = await localRepository.reserveAiCall(
+        usuario,
+        { task: 'reviewResume', fingerprint: 'y' },
+        JANELA
+      );
+      assert.equal(reserva?.usedInHour, esperada);
+      assert.equal(reserva?.usedInDay, esperada);
+    }
+  });
+
+  it('não conta a reserva de outra pessoa', async () => {
+    const usuario = `reserva-isolada-${Date.now()}`;
+    const vizinho = `reserva-vizinho-${Date.now()}`;
+
+    for (let i = 0; i < 4; i++) {
+      await localRepository.reserveAiCall(vizinho, { task: 't', fingerprint: 'z' }, JANELA);
+    }
+
+    const minha = await localRepository.reserveAiCall(usuario, { task: 't', fingerprint: 'z' }, JANELA);
+    assert.equal(minha?.usedInHour, 1, 'a fila é por usuário, não global');
+    assert.equal(minha?.usedInDay, 1);
+  });
+
+  it('as duas janelas são medidas de forma independente, cada uma pelo seu `desde`', async () => {
+    const usuario = `reserva-janelas-${Date.now()}`;
+
+    await localRepository.reserveAiCall(usuario, { task: 't', fingerprint: 'a' }, JANELA);
+    const segunda = await localRepository.reserveAiCall(
+      usuario,
+      { task: 't', fingerprint: 'b' },
+      // Janela da hora deslocada para o futuro: nenhuma reserva cabe nela, nem
+      // a própria. É o que distingue "as duas contagens usam o mesmo `desde`
+      // por engano" de "cada uma usa o seu" — com o mesmo `desde` as duas
+      // dariam 2, e o limite por hora passaria a punir uso do dia inteiro.
+      { desdeHora: new Date(Date.now() + 60_000).toISOString(), desdeDia: ONTEM }
+    );
+
+    assert.equal(segunda?.usedInHour, 0, 'nada cabe numa janela que começa no futuro');
+    assert.equal(segunda?.usedInDay, 2, 'a janela do dia continua contando as duas');
+  });
+
+  it('nunca devolve null: `null` significa "o banco não sabe", e um arquivo sabe', async () => {
+    const reserva = await localRepository.reserveAiCall(
+      `reserva-nao-nula-${Date.now()}`,
+      { task: 't', fingerprint: 'w' },
+      JANELA
+    );
+    assert.notEqual(reserva, null);
+  });
+});

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { localRepository } from '@/lib/db/local/repository';
 import { AiError } from '@/services/ai';
 import type { AiEnvelope } from '@/types/ai';
 import { runWithBudget } from './ai-budget';
@@ -433,6 +434,94 @@ describe('corrida de concorrência (TOCTOU)', () => {
 
     assert.equal(sucesso, 2, `deveria deixar passar exatamente o limite diário (2); passaram ${sucesso}`);
     assert.equal(chamadasReais, 2);
+  });
+});
+
+/**
+ * O CAMINHO DE RECUO, que é o que roda em produção enquanto a migration não
+ * for aplicada.
+ *
+ * `reserveAiCall` devolvendo `null` significa "este banco ainda não tem
+ * `public.reservar_chamada_ia`" — o caso concreto de subir o código antes de
+ * rodar `docs/migrations/2026-08-28-reserva-atomica-ia.sql`. Aí `ai-budget`
+ * volta ao caminho antigo: `recordAiCall` mais dois `countAiCalls`.
+ *
+ * Esse caminho é a diferença entre "a corrida continua reduzida" e "toda
+ * análise de IA caiu porque uma função não existe". Sem teste, ele é código
+ * que só executa em produção, no dia do deploy, e ninguém descobre que
+ * apodreceu até ser tarde.
+ *
+ * O `null` é forçado trocando o método do repositório de verdade — não um
+ * repositório de mentira. O store local, o arquivo em disco e o resto de
+ * `runWithBudget` continuam sendo os de produção.
+ */
+describe('recuo quando o banco não tem a função de reserva atômica', () => {
+  const original = localRepository.reserveAiCall;
+
+  beforeEach(() => {
+    localRepository.reserveAiCall = async () => null;
+  });
+
+  afterEach(() => {
+    localRepository.reserveAiCall = original;
+  });
+
+  /**
+   * SEQUENCIAL, E NÃO EM RAJADA — de propósito.
+   *
+   * O recuo NÃO promete exatidão sob paralelismo, e um teste que exigisse isso
+   * dele estaria testando uma garantia que o código nunca deu. Ele conta a
+   * posição comparando `(createdAt, id)`, e essa comparação não ordena por
+   * inserção: `createdAt` tem precisão de milissegundo e o `id` é um UUID
+   * aleatório, então duas reservas no mesmo milissegundo podem empatar de
+   * posição e passar as duas. É exatamente uma das razões de a função de banco
+   * existir — ver `docs/migrations/2026-08-28-reserva-atomica-ia.sql`.
+   *
+   * O que este teste protege é o que o recuo DE FATO promete: continuar
+   * existindo e continuar impondo o teto. O intervalo entre as chamadas separa
+   * os milissegundos e tira o empate da conta.
+   */
+  it('o limite continua sendo imposto, com o mesmo teto', async () => {
+    process.env.AI_HOURLY_LIMIT = '2';
+    process.env.AI_DAILY_LIMIT = '1000';
+    const userId = randomUUID();
+    let chamadasReais = 0;
+
+    const run = async () => {
+      chamadasReais += 1;
+      return envelope({ ok: true });
+    };
+
+    let sucesso = 0;
+    for (let i = 0; i < 5; i++) {
+      try {
+        await runWithBudget(userId, 'reviewResume', { i }, run);
+        sucesso += 1;
+      } catch (erro) {
+        assert.ok(erro instanceof AiError && erro.kind === 'cota');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3));
+    }
+
+    assert.equal(sucesso, 2, `o recuo deveria impor o mesmo teto (2); passaram ${sucesso}`);
+    assert.equal(chamadasReais, 2);
+  });
+
+  it('a reserva recusada é desfeita, e não fica ocupando vaga para sempre', async () => {
+    process.env.AI_HOURLY_LIMIT = '1';
+    process.env.AI_DAILY_LIMIT = '1000';
+    const userId = randomUUID();
+    const run = async () => envelope({ ok: true });
+
+    await runWithBudget(userId, 'reviewResume', { i: 1 }, run);
+
+    // A segunda estoura o limite. Se a reserva dela não fosse desfeita, ela
+    // continuaria contando e o usuário ficaria bloqueado por uma chamada que
+    // nunca aconteceu — bloqueio que só passaria sozinho ao fim da janela.
+    await assert.rejects(() => runWithBudget(userId, 'reviewResume', { i: 2 }, run), AiError);
+
+    const registradas = await localRepository.countAiCalls(userId, new Date(Date.now() - 60 * 60_000).toISOString());
+    assert.equal(registradas, 1, 'a reserva recusada deveria ter sido apagada');
   });
 });
 

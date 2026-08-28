@@ -52,6 +52,36 @@ export interface Repository {
    * passam de verdade.
    */
   countAiCalls(ownerId: string, since: string, upTo?: { createdAt: string; id: string }): Promise<number>;
+  /**
+   * Grava a reserva E devolve a posição dela nas duas janelas, ATOMICAMENTE.
+   *
+   * É o caminho preferido de `runWithBudget`, e existe porque fazer a mesma
+   * coisa em três idas ao banco (`recordAiCall` + dois `countAiCalls`) deixa
+   * uma corrida aberta no Supabase: em READ COMMITTED, o SELECT de uma
+   * transação não enxerga a linha que outra inseriu e ainda não commitou, e N
+   * requisições paralelas do mesmo usuário se acham todas a 1ª da fila. A
+   * janela é de milissegundos, não mais de uma chamada de IA inteira, mas
+   * milissegundo não é zero e o prejuízo é custo de API real.
+   *
+   * As duas janelas vêm juntas, e não uma de cada vez, porque o ganho está
+   * justamente em não voltar ao banco no meio: o custo de calcular a posição
+   * do dia junto com a da hora é uma contagem a mais dentro da MESMA
+   * transação já travada.
+   *
+   * DEVOLVER `null` NÃO É ERRO — é "este banco não sabe fazer isso agora", e o
+   * chamador deve cair no caminho antigo. O caso concreto é o deploy do código
+   * novo antes de a migration ter rodado (ver
+   * `docs/migrations/2026-08-28-reserva-atomica-ia.sql`): tratar isso como
+   * falha derrubaria toda análise de IA em produção por causa de uma função
+   * que ainda não existe, o que é muito pior do que a corrida que ela fecha.
+   * Erro DE VERDADE (banco fora do ar, permissão negada) continua sendo
+   * exceção, e continua fazendo a análise falhar fechada.
+   */
+  reserveAiCall(
+    ownerId: string,
+    entry: { task: string; fingerprint: string },
+    janela: { desdeHora: string; desdeDia: string }
+  ): Promise<{ id: string; createdAt: string; usedInHour: number; usedInDay: number } | null>;
   /** Resposta guardada para a mesma pergunta, se ainda estiver dentro da janela. */
   findAiCall(ownerId: string, fingerprint: string, since: string): Promise<AiCallRecord | null>;
   /**

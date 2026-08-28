@@ -133,6 +133,48 @@ function fail(operation: string, message: string): never {
   throw new Error(`Supabase: falha em ${operation} — ${message}`);
 }
 
+/** Linha devolvida por `public.reservar_chamada_ia`. */
+interface ReservaRow {
+  reserva_id: string;
+  reserva_criada_em: string;
+  // `count(*)` é `bigint`; o PostgREST pode serializar como número ou como
+  // string dependendo da versão. Aceitar os dois e converter é mais barato que
+  // depender de qual chegou.
+  posicao_hora: number | string;
+  posicao_dia: number | string;
+}
+
+/**
+ * O erro é "essa função não existe"?
+ *
+ * `PGRST202` é o PostgREST não achando a função no cache de esquema;
+ * `42883` é o `undefined_function` do próprio Postgres. Os dois querem dizer a
+ * mesma coisa para nós: a migration ainda não rodou neste banco.
+ *
+ * A checagem também olha a mensagem porque o código nem sempre vem preenchido
+ * em toda versão do cliente, e confundir "função ausente" com "banco fora do
+ * ar" nas duas direções é caro: para um lado derruba a IA inteira por causa de
+ * uma migration pendente, para o outro esconde uma falha de banco atrás de um
+ * fallback silencioso.
+ */
+function funcaoAusente(error: { code?: string; message?: string }): boolean {
+  if (error.code === 'PGRST202' || error.code === '42883') return true;
+  const mensagem = (error.message ?? '').toLowerCase();
+  return (
+    mensagem.includes('reservar_chamada_ia') &&
+    (mensagem.includes('does not exist') || mensagem.includes('could not find'))
+  );
+}
+
+/**
+ * O aviso de migration pendente sai UMA VEZ por processo, não por chamada.
+ *
+ * Sem isto, um banco sem a migration enche o log com uma linha por análise —
+ * e um log que rola sozinho é um log que ninguém lê, justamente quando ele
+ * carrega a única pista de que a corrida continua aberta.
+ */
+let avisouFuncaoAusente = false;
+
 function toAppUser(row: ProfileRow): AppUser {
   return {
     id: row.id,
@@ -219,6 +261,55 @@ export function createSupabaseRepository(client: SupabaseClient): Repository {
       const { count, error } = await query;
       if (error) fail('countAiCalls', error.message);
       return count ?? 0;
+    },
+
+    /**
+     * Reserva e conta as duas janelas numa transação só, no banco.
+     *
+     * É `rpc` e não três chamadas encadeadas porque o ponto INTEIRO é que o
+     * INSERT e as contagens rodem sob a mesma trava, sem volta ao Node no
+     * meio. Ver `docs/migrations/2026-08-28-reserva-atomica-ia.sql` para por
+     * que a versão em três idas ao banco deixava a corrida aberta.
+     *
+     * A função é `security invoker`, então a RLS de `ai_calls` continua
+     * valendo dentro dela: passar o `owner_id` de outra pessoa não grava nada,
+     * o INSERT é recusado pela policy. O filtro por `owner_id` que todo método
+     * deste driver faz continua sendo cinto e suspensório, não a garantia.
+     */
+    async reserveAiCall(ownerId, entry, janela) {
+      const { data, error } = await client
+        .rpc('reservar_chamada_ia', {
+          p_owner_id: ownerId,
+          p_task: entry.task,
+          p_fingerprint: entry.fingerprint,
+          p_desde_hora: janela.desdeHora,
+          p_desde_dia: janela.desdeDia,
+        })
+        .single<ReservaRow>();
+
+      if (error) {
+        // Migration pendente: NÃO é erro. Devolver `null` manda o chamador
+        // para o caminho antigo, que funciona — só deixa a corrida aberta.
+        // Ver o comentário de `reserveAiCall` em `src/lib/db/repository.ts`.
+        if (funcaoAusente(error)) {
+          if (!avisouFuncaoAusente) {
+            avisouFuncaoAusente = true;
+            console.warn(
+              '[supabase] reservar_chamada_ia ausente: usando o caminho não-atômico. ' +
+                'Rode docs/migrations/2026-08-28-reserva-atomica-ia.sql para fechar a corrida do teto de IA.'
+            );
+          }
+          return null;
+        }
+        fail('reserveAiCall', error.message);
+      }
+
+      return {
+        id: data.reserva_id,
+        createdAt: data.reserva_criada_em,
+        usedInHour: Number(data.posicao_hora),
+        usedInDay: Number(data.posicao_dia),
+      };
     },
 
     async findAiCall(ownerId, fingerprint, since) {

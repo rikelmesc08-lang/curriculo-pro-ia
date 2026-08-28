@@ -25,6 +25,33 @@ function now(): string {
  */
 const LOCAL_AI_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
+/**
+ * A linha está dentro da janela E até a posição `upTo` na fila?
+ *
+ * Extraído porque `countAiCalls` e `reserveAiCall` PRECISAM concordar: se as
+ * duas contarem por critérios diferentes, o mesmo usuário recebe um teto
+ * quando o banco tem a função atômica e outro quando cai no caminho antigo —
+ * e a diferença só apareceria em produção, sob rajada.
+ *
+ * A comparação é de tupla `(createdAt, id)`, não só de `createdAt`: o
+ * timestamp tem precisão de milissegundo e várias reservas concorrentes podem
+ * cair no mesmo instante. Sem o desempate por `id` elas empatariam na mesma
+ * posição, e mais de uma se veria como "a 1ª da fila" — furando o teto
+ * exatamente no caso que a senha de fila existe para fechar.
+ */
+function ateAPosicao(
+  call: { ownerId: string; createdAt: string; id: string },
+  ownerId: string,
+  since: string,
+  upTo?: { createdAt: string; id: string }
+): boolean {
+  if (call.ownerId !== ownerId || call.createdAt < since) return false;
+  if (!upTo) return true;
+  if (call.createdAt < upTo.createdAt) return true;
+  if (call.createdAt > upTo.createdAt) return false;
+  return call.id <= upTo.id;
+}
+
 export const localRepository: Repository = {
   async findUserById(id) {
     const user = await read((db) => db.users.find((candidate) => candidate.id === id));
@@ -55,21 +82,70 @@ export const localRepository: Repository = {
   },
 
   async countAiCalls(ownerId, since, upTo) {
-    return read((db) =>
-      db.aiCalls.filter((call) => {
-        if (call.ownerId !== ownerId || call.createdAt < since) return false;
-        if (!upTo) return true;
-        // Posição na fila, não só janela de tempo: `createdAt` tem precisão
-        // de milissegundo, e várias reservas concorrentes podem cair no
-        // mesmo milissegundo. Sem o desempate por `id`, elas empatariam na
-        // mesma posição e mais de uma reserva se veria como "a 1ª da fila" —
-        // furando o teto exatamente no caso (rajada paralela) que este
-        // parâmetro existe para fechar.
-        if (call.createdAt < upTo.createdAt) return true;
-        if (call.createdAt > upTo.createdAt) return false;
-        return call.id <= upTo.id;
-      }).length
-    );
+    return read((db) => db.aiCalls.filter((call) => ateAPosicao(call, ownerId, since, upTo)).length);
+  },
+
+  /**
+   * Reserva e conta as duas janelas dentro de UM `mutate`.
+   *
+   * O driver local já fechava esta corrida sem função nenhuma: `store.ts`
+   * serializa toda leitura e escrita numa fila só, então o INSERT e as
+   * contagens nunca se intercalavam. Implementar o método aqui não conserta
+   * nada que estivesse quebrado — serve para que os dois drivers percorram o
+   * MESMO caminho em `ai-budget.ts`, e para que a suíte (que roda toda no
+   * driver local) exercite esse caminho de verdade, incluindo os dois testes
+   * de rajada paralela. Um método implementado só no Supabase seria um
+   * caminho de produção sem cobertura nenhuma.
+   *
+   * NUNCA DEVOLVE `null`: o `null` do contrato significa "o banco não sabe
+   * fazer isso agora", e um arquivo JSON sempre sabe.
+   */
+  async reserveAiCall(ownerId, entry, janela) {
+    const id = randomUUID();
+    const createdAt = now();
+
+    return mutate((db) => {
+      db.aiCalls.push({
+        id,
+        ownerId,
+        task: entry.task,
+        fingerprint: entry.fingerprint,
+        result: {},
+        createdAt,
+      });
+
+      const cutoff = new Date(Date.now() - LOCAL_AI_RETENTION_MS).toISOString();
+      db.aiCalls = db.aiCalls.filter((call) => call.createdAt >= cutoff);
+
+      // CONTAGEM SIMPLES, SEM `upTo` — e isso é o ponto desta função.
+      //
+      // O caminho antigo precisa comparar `(createdAt, id)` porque as reservas
+      // concorrentes não estão serializadas: cada uma tem que descobrir a
+      // própria posição sem saber quantas outras vieram. Só que essa
+      // comparação NÃO ordena por inserção: `createdAt` tem precisão de
+      // milissegundo e o `id` é um UUID ALEATÓRIO, então duas reservas no
+      // mesmo milissegundo saem na ordem do sorteio. A que entrou primeiro
+      // pode ter o id maior — aí a segunda não a conta, as duas se veem na
+      // posição 1, e as duas passam.
+      //
+      // Aqui isso não acontece porque não há o que desempatar: este bloco roda
+      // dentro de um `mutate`, e `store.ts` serializa toda operação numa fila
+      // só. Quando ele executa, TODAS as reservas anteriores já estão no
+      // array e nenhuma posterior entrou. "Quantas linhas existem na janela"
+      // já É a posição desta reserva na fila, com a própria incluída.
+      //
+      // É a mesma razão pela qual a função de banco não compara tupla: lá a
+      // serialização vem da trava por usuário, aqui vem da fila do arquivo.
+      const naJanela = (desde: string) =>
+        db.aiCalls.filter((call) => ateAPosicao(call, ownerId, desde)).length;
+
+      return {
+        id,
+        createdAt,
+        usedInHour: naJanela(janela.desdeHora),
+        usedInDay: naJanela(janela.desdeDia),
+      };
+    });
   },
 
   async findAiCall(ownerId, fingerprint, since) {
