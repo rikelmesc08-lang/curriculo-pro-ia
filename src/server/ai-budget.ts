@@ -66,14 +66,25 @@ export { capInput, MAX_INPUT_CHARS } from '@/services/ai/fingerprint';
  *     `(createdAt, id)` é estável desde o instante em que ela é gravada, e
  *     como a leitura da contagem roda depois, na mesma fila, ela sempre
  *     enxerga a posição definitiva — nunca uma posição que ainda vai mudar.
- *   - Driver `supabase`: reduz a janela ao tamanho de um INSERT (a reserva) e
- *     dois SELECTs (as duas contagens), mas não a fecha por completo. A linha
- *     de uma transação concorrente que ainda não deu commit pode não estar
- *     visível para o SELECT de outra requisição — então um punhado de
- *     chamadas ainda pode furar o teto, não mais um número proporcional ao
- *     paralelismo total. Fechar por completo exigiria uma função de banco que
- *     conte e grave num único statement (o que precisaria de uma migration —
- *     ver `docs/migrations`).
+ *   - Driver `supabase`: FECHADA desde 28/08/2026, pela função de banco
+ *     `public.reservar_chamada_ia`
+ *     (`docs/migrations/2026-08-28-reserva-atomica-ia.sql`). Ela pega uma
+ *     trava por usuário (`pg_advisory_xact_lock`) e faz o INSERT da reserva
+ *     mais as duas contagens numa transação só: a segunda requisição do mesmo
+ *     usuário espera a primeira commitar, e quando conta já enxerga a linha
+ *     dela.
+ *
+ *     Antes disso, a versão em três idas ao banco reduzia a janela ao tamanho
+ *     de um INSERT e dois SELECTs, mas não a fechava: em READ COMMITTED, a
+ *     linha de uma transação que ainda não deu commit não aparece no SELECT de
+ *     outra, então um punhado de chamadas paralelas ainda furava o teto.
+ *
+ *     ESSE CAMINHO ANTIGO CONTINUA NO CÓDIGO, e não é resíduo: é o que roda
+ *     quando `reserveAiCall` devolve `null`, isto é, quando o banco ainda não
+ *     recebeu a migration. Sem ele, subir o código antes de rodar o SQL
+ *     derrubaria toda análise de IA em produção — trocar uma corrida por uma
+ *     indisponibilidade é exatamente o erro que a primeira tentativa desta
+ *     correção já cometeu uma vez (ver os parágrafos acima).
  *
  * Se a reserva não vira uma chamada de verdade — limite estourado, ou erro que
  * não chegou a sair (`configuracao`/`cota`) —, ela é desfeita
@@ -144,11 +155,25 @@ export async function runWithBudget<T>(
   // sem o controle de cota que esta função existe para impor. Uma
   // instabilidade passageira do banco passa a bloquear a análise em vez de
   // rodá-la sem contar — a troca certa para uma camada de limite de custo.
-  const reservation = await repository.recordAiCall(userId, {
-    task: `reserva:${task}`,
-    fingerprint: reservaFingerprint(key),
-    result: {},
-  });
+  const reservaEntry = { task: `reserva:${task}`, fingerprint: reservaFingerprint(key) };
+
+  // As duas janelas são fixadas AQUI, antes da reserva, e as mesmas strings
+  // servem ao caminho atômico e ao antigo. Assim os dois medem exatamente a
+  // mesma janela — se cada um chamasse `minutesAgo` na hora que precisasse,
+  // eles divergiriam por alguns microssegundos, e uma divergência dessas entre
+  // dois caminhos que precisam concordar é o tipo de coisa que só aparece na
+  // borda da janela, em produção.
+  const desdeHora = minutesAgo(60);
+  const desdeDia = minutesAgo(24 * 60);
+
+  // CAMINHO PREFERIDO: reserva e as duas posições numa transação só, sob trava
+  // por usuário. Fecha a corrida por completo. `null` significa que este banco
+  // ainda não tem a função (migration pendente), não que houve erro — e aí o
+  // caminho antigo assume, com a corrida reduzida mas aberta.
+  const atomica = await repository.reserveAiCall(userId, reservaEntry, { desdeHora, desdeDia });
+
+  const reservation =
+    atomica ?? (await repository.recordAiCall(userId, { ...reservaEntry, result: {} }));
   const reservationId = reservation.id;
 
   /** Desfaz a reserva. Best-effort: nunca deixa um erro daqui mascarar o motivo original. */
@@ -171,7 +196,9 @@ export async function runWithBudget<T>(
   // desta correção, só que agora calculada por posição, não por contagem
   // total.
   const hourly = env.aiHourlyLimit();
-  const usedInHour = await repository.countAiCalls(userId, minutesAgo(60), reservation);
+  const usedInHour = atomica
+    ? atomica.usedInHour
+    : await repository.countAiCalls(userId, desdeHora, reservation);
   if (usedInHour > hourly) {
     await liberarReserva();
     throw new AiError(
@@ -183,7 +210,12 @@ export async function runWithBudget<T>(
   }
 
   const daily = env.aiDailyLimit();
-  const usedInDay = await repository.countAiCalls(userId, minutesAgo(24 * 60), reservation);
+  // No caminho atômico as duas posições já vieram juntas. No caminho antigo,
+  // esta consulta continua sendo feita só depois de o limite da hora passar —
+  // falhar na hora evita a ida ao banco do limite diário.
+  const usedInDay = atomica
+    ? atomica.usedInDay
+    : await repository.countAiCalls(userId, desdeDia, reservation);
   if (usedInDay > daily) {
     await liberarReserva();
     throw new AiError(

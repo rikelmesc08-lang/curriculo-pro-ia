@@ -12,6 +12,7 @@ roda os arquivos desta pasta, **na ordem do nome** (a data no início do nome
 é a ordem de aplicação):
 
 1. `2026-08-24-grants-service-role.sql`
+2. `2026-08-28-reserva-atomica-ia.sql`
 
 Cada migration é auto-contida e comentada em português, com o motivo da
 mudança, se é destrutiva ou não, e uma consulta de verificação no final.
