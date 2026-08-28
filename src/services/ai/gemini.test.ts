@@ -50,6 +50,37 @@ function respostaDeErro(status: number, message: string) {
   } as unknown as Response;
 }
 
+/**
+ * Um 429 com os `details` que o Google manda de verdade.
+ *
+ * O corpo abaixo foi COPIADO de uma resposta real, capturada em 28/08/2026
+ * contra `gemini-3.6-flash`: o nível gratuito permite 20 chamadas POR DIA no
+ * projeto inteiro, e foi isso que derrubou a importação de currículo em
+ * produção. Inventar o formato aqui testaria a nossa imaginação; copiá-lo testa
+ * o que chega.
+ */
+function resposta429ComCota(quotaId: string, quotaValue: string) {
+  return {
+    ok: false,
+    status: 429,
+    json: async () => ({
+      error: {
+        code: 429,
+        status: 'RESOURCE_EXHAUSTED',
+        message: 'You exceeded your current quota, please check your plan and billing details.',
+        details: [
+          { '@type': 'type.googleapis.com/google.rpc.Help', links: [] },
+          {
+            '@type': 'type.googleapis.com/google.rpc.QuotaFailure',
+            violations: [{ quotaId, quotaValue }],
+          },
+          { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '48s' },
+        ],
+      },
+    }),
+  } as unknown as Response;
+}
+
 const fetchOriginal = globalThis.fetch;
 let chamadas: { url: string; init: RequestInit }[] = [];
 
@@ -214,6 +245,109 @@ describe('extractJson', () => {
  * no mesmo nome de modelo se contaminariam pela ordem de execução, e o teste do
  * recuo apagaria o do caminho feliz.
  */
+/**
+ * O QUE A MENSAGEM DE ERRO MANDA A PESSOA FAZER.
+ *
+ * Estas mensagens são a única coisa que sobra quando a IA falha, e as duas que
+ * existiam davam conselho impossível de seguir: mandavam quem enviou um PDF
+ * "reduzir o texto colado" (não havia texto colado), e prometiam "alguns
+ * minutos" para uma cota que é DIÁRIA. Conselho errado é pior que nenhum: a
+ * pessoa fica clicando contra uma parede em vez de usar a saída que funciona.
+ */
+describe('mensagens de erro dizem a verdade sobre a causa', () => {
+  async function erroDe(resposta: Response, task = tarefa()): Promise<AiError> {
+    mockFetch(resposta);
+    try {
+      await geminiProvider.run(task);
+    } catch (erro) {
+      return erro as AiError;
+    }
+    throw new Error('a chamada devia ter falhado');
+  }
+
+  it('cota DIÁRIA não promete que libera em minutos', async () => {
+    const erro = await erroDe(
+      resposta429ComCota('GenerateRequestsPerDayPerProjectPerModel-FreeTier', '20')
+    );
+
+    assert.equal(erro.kind, 'limite');
+    assert.match(erro.userMessage, /amanhã/i, 'precisa dizer quando volta de verdade');
+    assert.match(erro.userMessage, /20/, 'dizer o número torna o limite compreensível');
+    assert.doesNotMatch(
+      erro.userMessage,
+      /alguns minutos/i,
+      'com cota diária, "alguns minutos" deixa a pessoa clicando por horas'
+    );
+  });
+
+  it('cota por minuto continua pedindo para esperar um instante', async () => {
+    const erro = await erroDe(
+      resposta429ComCota('GenerateRequestsPerMinutePerProjectPerModel-FreeTier', '10')
+    );
+
+    assert.equal(erro.kind, 'limite');
+    assert.match(erro.userMessage, /instante|espere/i);
+    assert.doesNotMatch(erro.userMessage, /amanhã/i, 'esta libera em segundos, não amanhã');
+  });
+
+  it('429 sem detalhes não inventa prazo nenhum', async () => {
+    const erro = await erroDe(respostaDeErro(429, 'Resource has been exhausted'));
+
+    assert.equal(erro.kind, 'limite');
+    assert.doesNotMatch(
+      erro.userMessage,
+      /alguns minutos|amanhã/i,
+      'sem saber qual cota estourou, prometer prazo é chute'
+    );
+  });
+
+  it('tempo esgotado COM arquivo manda colar o texto, não reduzir texto que não existe', async () => {
+    globalThis.fetch = (async () => {
+      const erro = new Error('timeout');
+      erro.name = 'TimeoutError';
+      throw erro;
+    }) as unknown as typeof fetch;
+
+    const comPdf: AiTask<{ ok: boolean }> = {
+      ...tarefa(),
+      attachment: { mimeType: 'application/pdf', dataBase64: 'ZmFrZQ==' },
+    };
+
+    let erro: AiError | null = null;
+    try {
+      await geminiProvider.run(comPdf);
+    } catch (e) {
+      erro = e as AiError;
+    }
+
+    assert.ok(erro);
+    assert.match(erro.userMessage, /colar o texto/i, 'é a saída medida como 10x mais rápida');
+    assert.doesNotMatch(
+      erro.userMessage,
+      /reduza o tamanho do texto colado/i,
+      'quem mandou PDF não colou texto nenhum'
+    );
+  });
+
+  it('tempo esgotado SEM arquivo continua falando do texto colado', async () => {
+    globalThis.fetch = (async () => {
+      const erro = new Error('timeout');
+      erro.name = 'TimeoutError';
+      throw erro;
+    }) as unknown as typeof fetch;
+
+    let erro: AiError | null = null;
+    try {
+      await geminiProvider.run(tarefa());
+    } catch (e) {
+      erro = e as AiError;
+    }
+
+    assert.ok(erro);
+    assert.match(erro.userMessage, /texto colado/i);
+  });
+});
+
 describe('thinkingConfig', () => {
   function corpoDe(indice: number): Record<string, unknown> {
     return JSON.parse(String(chamadas[indice].init.body)) as Record<string, unknown>;
