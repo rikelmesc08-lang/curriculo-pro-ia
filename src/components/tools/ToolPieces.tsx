@@ -1,5 +1,6 @@
 'use client';
 
+import { ferramentaPor } from '@/components/layout/AppNav';
 import { ButtonLink } from '@/components/ui/Button';
 import { TextAreaField } from '@/components/ui/Field';
 import { EmptyState } from '@/components/ui/Feedback';
@@ -60,14 +61,38 @@ export function JobDescriptionInput({
  * sempre JÁ TEM um currículo — foi por causa dele que veio. Criar do zero é o
  * caso de quem ainda não tem nenhum, que é a minoria nesta tela.
  */
-export function NoResumeNotice({ tool }: { tool: string }) {
+/**
+ * A tela de uma ferramenta que ainda não tem currículo para trabalhar.
+ *
+ * RECEBE O ENDEREÇO DA FERRAMENTA, NÃO UM TEXTO. Antes recebia um rótulo solto
+ * (`tool="A análise completa"`) e montava a mesma tela para as seis
+ * ferramentas: mesmo título, mesmos botões, mudando uma frase no meio. O
+ * resultado é que todas as abas pareciam a mesma tela de "criar currículo", e
+ * era impossível saber, olhando, em qual delas se estava.
+ *
+ * Passar o `href` resolve os dois lados de uma vez: o texto vem de `AppNav.ts`,
+ * onde já mora a identidade de cada ferramenta, e o mesmo `href` vira o
+ * `?voltar=` que traz a pessoa de volta PARA CÁ depois de importar — em vez de
+ * despejá-la no editor de currículo, que era o destino fixo antes e o que
+ * fazia a intenção original se perder no caminho.
+ */
+export function NoResumeNotice({ href }: { href: string }) {
+  const ferramenta = ferramentaPor(href);
+  const copy = ferramenta?.semCurriculo;
+
   return (
     <EmptyState
-      title="Você ainda não tem um currículo salvo"
-      description={`${tool} trabalha em cima do seu currículo. Se você já tem um pronto, envie o arquivo e a IA preenche tudo para você conferir — não precisa redigitar.`}
+      // O `??` não é decoração defensiva: um `href` sem `semCurriculo` é erro de
+      // programação, mas cair numa tela sem título seria pior para quem estiver
+      // usando o site na hora em que esse erro chegasse à produção.
+      title={copy?.titulo ?? 'Para continuar, preciso do seu currículo'}
+      description={`${copy?.promessa ?? ''} Se você já tem um currículo pronto, envie o arquivo e a IA preenche tudo para você conferir — não precisa redigitar.`.trim()}
       action={
         <div className="flex flex-col items-center gap-3 sm:flex-row">
-          <ButtonLink href="/app/curriculo/importar" className="uppercase tracking-wide">
+          <ButtonLink
+            href={`/app/curriculo/importar?voltar=${encodeURIComponent(href)}`}
+            className="uppercase tracking-wide"
+          >
             Enviar meu currículo pronto
           </ButtonLink>
           <ButtonLink href="/app/curriculo" variant="secondary">

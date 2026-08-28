@@ -30,7 +30,7 @@ export default async function CoverLetterPage() {
         title="Carta de apresentação"
         description="Uma carta curta e específica para a vaga, escrita a partir do seu histórico real."
       />
-      {resume ? <CoverLetterTool resume={toContent(resume)} /> : <NoResumeNotice tool="A carta de apresentação" />}
+      {resume ? <CoverLetterTool resume={toContent(resume)} /> : <NoResumeNotice href="/app/carta" />}
     </>
   );
 }

@@ -33,7 +33,7 @@ export default async function AnalyzeJobPage() {
       {resume ? (
         <JobAnalysisTool resume={toContent(resume)} />
       ) : (
-        <NoResumeNotice tool="A análise de compatibilidade" />
+        <NoResumeNotice href="/app/analisar-vaga" />
       )}
     </>
   );
