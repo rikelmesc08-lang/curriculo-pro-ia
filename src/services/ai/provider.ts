@@ -57,6 +57,27 @@ export interface AiTask<T> {
   schema: ZodType<T>;
   maxTokens: number;
   /**
+   * Quanto o modelo deve "pensar" antes de escrever.
+   *
+   * `'minimal'` só para tarefa de TRANSCRIÇÃO — copiar para um formato
+   * estruturado o que já está escrito. Aí o raciocínio não decide nada e só
+   * custa tempo: medido em 28/08/2026 com um PDF real de 23 KB, a importação
+   * gastava 2.500 tokens de pensamento para escrever 931 de resposta, e levava
+   * 20,1s. Com `'minimal'` foram 6,0s e ZERO tokens de pensamento — e o JSON
+   * extraído saiu idêntico, campo por campo.
+   *
+   * NÃO É PARA AS DEMAIS TAREFAS, e a diferença não é de grau. Analisar um
+   * currículo, comparar com uma vaga, reescrever um texto ou preparar
+   * perguntas de entrevista são tarefas de JULGAMENTO: o raciocínio é onde o
+   * trabalho acontece, e cortá-lo trocaria segundos por qualidade justamente
+   * no que a pessoa está pagando para receber. Por isso o padrão é não mexer,
+   * e cada tarefa que abre mão precisa dizer isso explicitamente aqui.
+   *
+   * O provedor que não souber controlar isto deve IGNORAR o campo, nunca
+   * falhar: é preferência de desempenho, não requisito de correção.
+   */
+  reasoning?: 'default' | 'minimal';
+  /**
    * Resultado do modo demonstração.
    *
    * REGRA: pode reorganizar, cortar e rotular o que o usuário forneceu.

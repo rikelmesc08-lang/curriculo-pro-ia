@@ -87,6 +87,9 @@ export async function importResumeFromFile(
   const envelope = await runAiTask<Extracao>({
     name: 'importResume',
     maxTokens: 4000,
+    // Transcrever não é julgar: o raciocínio não decide nada aqui e custa o
+    // triplo do tempo. Ver `reasoning` em `provider.ts` para a medição.
+    reasoning: 'minimal',
     schema: extracaoSchema,
     system: SISTEMA,
     attachment,
@@ -105,6 +108,7 @@ export async function importResumeFromText(text: string): Promise<AiEnvelope<Res
   const envelope = await runAiTask<Extracao>({
     name: 'importResumeText',
     maxTokens: 4000,
+    reasoning: 'minimal',
     schema: extracaoSchema,
     system: SISTEMA,
     prompt: [INSTRUCOES, '', 'CURRÍCULO A TRANSCREVER:', '', text].join('\n'),
