@@ -128,6 +128,51 @@ describe('as páginas e a lista não saem de sincronia', () => {
     });
   }
 
+  /**
+   * A VOLTA PASSA PELO FORMULÁRIO. Sempre.
+   *
+   * A primeira versão desta mudança mandava a pessoa direto da importação para
+   * a ferramenta. Duas coisas quebravam: o botão que ela clicava diz "conferir
+   * e corrigir no formulário" e não levava a formulário nenhum; e, pior, ela
+   * passava a usar um currículo que a IA transcreveu sem ninguém conferir —
+   * o oposto do que o topo de `resume-import.ts` declara. No teste que
+   * encontrou isto, o modelo tinha deixado o cargo pretendido em branco.
+   *
+   * Estes testes leem o fonte porque as páginas são componentes de servidor
+   * com `requireUser` e acesso a banco: não carregam no runner.
+   */
+  it('a importação manda para o formulário, nunca direto para a ferramenta', () => {
+    const fonte = readFileSync(
+      new URL('../../../src/app/app/curriculo/importar/page.tsx', import.meta.url),
+      'utf8'
+    );
+
+    const achado = /const destino = origem\s*\?\s*`([^`]+)`/.exec(fonte);
+    assert.ok(achado, 'não achei como o destino pós-importação é montado');
+    assert.ok(
+      achado[1].startsWith('/app/curriculo?'),
+      `o destino virou "${achado[1]}" — pular o formulário faz a pessoa usar um currículo não conferido`
+    );
+  });
+
+  it('o formulário oferece a volta, e só para destino validado', () => {
+    const fonte = readFileSync(
+      new URL('../../../src/app/app/curriculo/page.tsx', import.meta.url),
+      'utf8'
+    );
+
+    // O link tem que sair de `rotaDeRetorno`, e não do parâmetro cru: é o que
+    // impede um `?voltar=https://site-de-golpe/` virar href de um botão que a
+    // pessoa clica logo depois de importar o currículo.
+    assert.match(fonte, /rotaDeRetorno\(params\.voltar\)/, 'o formulário não valida o ?voltar=');
+    assert.match(fonte, /Voltar para \{volta\.label\}/, 'sumiu o botão de volta');
+    assert.doesNotMatch(
+      fonte,
+      /href=\{params\.voltar/,
+      'o href não pode vir do parâmetro cru da URL'
+    );
+  });
+
   it('toda ferramenta com texto de tela vazia é um destino de retorno válido', () => {
     // As duas listas precisam ser a MESMA. Se uma ferramenta ganha tela vazia
     // mas não é destino válido, ela manda a pessoa importar e depois a joga no

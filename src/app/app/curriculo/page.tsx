@@ -4,6 +4,7 @@ import { getRepository } from '@/lib/db';
 import { emptyResumeContent } from '@/types/resume';
 import { toContent } from '@/lib/resume/draft';
 import { SectionTitle } from '@/components/ui/Card';
+import { ferramentaPor, RETORNO_PADRAO, rotaDeRetorno } from '@/components/layout/AppNav';
 import { ButtonLink } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Feedback';
 import { ResumeBuilder } from '@/components/resume/ResumeBuilder';
@@ -29,10 +30,27 @@ export const metadata: Metadata = { title: 'Meu currículo' };
  * gerada em `/app/otimizar`, sem multiplicar documentos que depois ninguém
  * lembra qual é qual.
  */
-export default async function ResumeBuilderPage() {
+export default async function ResumeBuilderPage({ searchParams }: PageProps<'/app/curriculo'>) {
   const user = await requireUser('/app/curriculo');
   const repository = await getRepository();
   const existing = await repository.getLatestResume(user.id);
+
+  /**
+   * De onde a pessoa veio, quando veio de uma ferramenta.
+   *
+   * O caminho é: clicou em "Analisar currículo" sem ter currículo → importou →
+   * caiu AQUI para conferir o que a IA leu. Sem este parâmetro, a intenção
+   * original morre no formulário e ela precisa lembrar sozinha para onde ia.
+   *
+   * `rotaDeRetorno` valida contra a lista de ferramentas e devolve
+   * `/app/curriculo` para qualquer outra coisa — inclusive um endereço externo
+   * injetado na URL. Ver a defesa contra redirecionamento aberto em
+   * `AppNav.ts`. Aqui o valor validado só vira o `href` de um link, mas passar
+   * pela mesma porta é o que garante que ele nunca aponte para fora.
+   */
+  const params = await searchParams;
+  const ferramenta = rotaDeRetorno(params.voltar);
+  const volta = ferramenta === RETORNO_PADRAO ? undefined : ferramentaPor(ferramenta);
 
   const initialContent = existing
     ? toContent(existing)
@@ -49,6 +67,31 @@ export default async function ResumeBuilderPage() {
         title="Crie seu currículo"
         description="Preencha etapa por etapa. Tudo é salvo automaticamente, e a pré-visualização mostra o resultado em tempo real."
       />
+
+      {/*
+        O caminho de volta para a ferramenta que a pessoa queria usar.
+
+        Fica NO TOPO e não no fim do formulário de propósito: ele não é um
+        "próximo passo" a ser alcançado depois de percorrer tudo, é uma saída
+        disponível a qualquer momento. Quem só precisava corrigir o cargo que a
+        IA não conseguiu ler tem que poder voltar em dois cliques, sem rolar
+        quatro etapas atrás de um botão.
+
+        Não some depois de editar, e não deveria: o formulário salva sozinho, e
+        a pessoa pode ir e voltar quantas vezes quiser.
+      */}
+      {volta && (
+        <Alert tone="info" title={`Confira o que foi lido antes de ${volta.label.toLowerCase()}`} className="mb-5">
+          <p>
+            Os dados abaixo vieram do arquivo que você enviou, e a leitura automática erra — junta
+            colunas, troca datas, deixa campo em branco. Corrija o que estiver errado; o formulário
+            salva sozinho a cada mudança.
+          </p>
+          <ButtonLink href={volta.href} size="sm" className="mt-3">
+            Voltar para {volta.label}
+          </ButtonLink>
+        </Alert>
+      )}
 
       {/*
         Só para quem está começando do zero.

@@ -41,8 +41,28 @@ export default async function ResumeImportPage({
    * recebe o valor JÁ validado; ele nunca vê o parâmetro cru.
    */
   const params = await searchParams;
-  const destino = rotaDeRetorno(params.voltar);
-  const origem = destino === RETORNO_PADRAO ? undefined : ferramentaPor(destino);
+  const ferramenta = rotaDeRetorno(params.voltar);
+  const origem = ferramenta === RETORNO_PADRAO ? undefined : ferramentaPor(ferramenta);
+
+  /**
+   * DEPOIS DE SALVAR, O FORMULÁRIO — SEMPRE. Nunca direto para a ferramenta.
+   *
+   * A primeira versão desta mudança mandava a pessoa direto para a análise, e
+   * isso contradizia o botão que ela tinha acabado de clicar: ele diz
+   * "conferir e corrigir no formulário". Pior que a contradição de texto era a
+   * de comportamento — `resume-import.ts` abre dizendo que EXTRAIR NUNCA É
+   * SALVAR justamente porque transcrição automática erra, e pular a conferência
+   * faz a pessoa analisar um currículo que a IA leu errado. No teste que
+   * encontrou isto, o modelo tinha deixado o cargo pretendido em branco com
+   * "não foi possível ler".
+   *
+   * A intenção não se perde: ela viaja no `?voltar=` até o formulário, que
+   * oferece o caminho de volta depois da conferência. Assim a pessoa revisa E
+   * chega onde queria — em vez de escolher entre as duas coisas.
+   */
+  const destino = origem
+    ? `/app/curriculo?voltar=${encodeURIComponent(ferramenta)}`
+    : RETORNO_PADRAO;
 
   return (
     <>
@@ -53,7 +73,7 @@ export default async function ResumeImportPage({
           // parece um desvio que interrompeu o que a pessoa ia fazer. Com
           // isto, é um passo do caminho que ela já escolheu.
           origem
-            ? `Envie o arquivo e a IA preenche o formulário para você conferir — sem redigitar tudo. Ao terminar, você volta para ${origem.label}.`
+            ? `Envie o arquivo e a IA preenche o formulário para você conferir — sem redigitar tudo. Depois de conferir, você volta para ${origem.label}.`
             : 'Já tem um currículo pronto? Envie o arquivo e a IA preenche o formulário para você conferir — sem redigitar tudo.'
         }
       />

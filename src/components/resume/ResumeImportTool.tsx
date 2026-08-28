@@ -71,9 +71,11 @@ export function ResumeImportTool({
 }: {
   existingResumeId: string | null;
   /**
-   * Para onde ir depois de salvar. Vem JÁ VALIDADO da página (`rotaDeRetorno`),
-   * nunca direto da URL — ver a defesa contra redirecionamento aberto em
-   * `AppNav.ts`.
+   * Para onde ir depois de salvar. É SEMPRE o formulário — o que varia é se ele
+   * leva junto o `?voltar=` da ferramenta de onde a pessoa veio.
+   *
+   * Vem JÁ MONTADO E VALIDADO da página (`rotaDeRetorno`), nunca direto da URL
+   * — ver a defesa contra redirecionamento aberto em `AppNav.ts`.
    */
   destino: string;
 }) {
@@ -162,17 +164,25 @@ export function ResumeImportTool({
       const resultado = await saveResumeAction(existingResumeId, importado.content);
       if (resultado.ok) {
         /**
-         * VOLTA PARA ONDE A PESSOA QUERIA IR, e não para o editor.
+         * O FORMULÁRIO, LEVANDO A INTENÇÃO JUNTO.
          *
-         * Este destino era `/app/curriculo` fixo. Quem clicava em "Analisar
-         * currículo" sem ter currículo salvo era mandado para cá, importava — e
-         * aterrissava no editor, sem análise nenhuma na tela e sem nada
-         * indicando que a análise ainda existia. A intenção com que a pessoa
-         * começou se perdia no meio do caminho, e o sintoma relatado foi
-         * "estou para analisar o currículo e só aparece para criar".
+         * Este destino era `/app/curriculo` fixo e sem parâmetro. Quem clicava
+         * em "Analisar currículo" sem ter currículo salvo era mandado para cá,
+         * importava — e aterrissava no editor, sem análise na tela e sem nada
+         * indicando que a análise ainda existia. A intenção morria no caminho,
+         * e o sintoma relatado foi "estou para analisar o currículo e só
+         * aparece para criar".
          *
-         * `destino` já vem validado do servidor contra a lista de ferramentas
-         * (`rotaDeRetorno`, em AppNav.ts) — não é o `?voltar=` cru da URL.
+         * A tentação era pular direto para a ferramenta. NÃO É O QUE ESTE
+         * BOTÃO PROMETE — ele diz "conferir e corrigir no formulário" —, e mais
+         * importante: pular a conferência faz a pessoa usar um currículo que a
+         * IA leu errado, que é exatamente o que o topo de `resume-import.ts`
+         * existe para impedir. Então continua indo para o formulário; o que
+         * mudou é que agora ele sabe de onde ela veio e oferece a volta.
+         *
+         * `destino` já vem montado e validado do servidor contra a lista de
+         * ferramentas (`rotaDeRetorno`, em AppNav.ts) — não é o `?voltar=` cru
+         * da URL.
          */
         router.push(destino);
       } else {
