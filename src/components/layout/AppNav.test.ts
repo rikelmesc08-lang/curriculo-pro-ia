@@ -167,6 +167,15 @@ describe('as páginas e a lista não saem de sincronia', () => {
     assert.match(fonte, /rotaDeRetorno\(params\.voltar\)/, 'o formulário não valida o ?voltar=');
     assert.match(fonte, /Voltar para \{volta\.label\}/, 'sumiu o botão de volta');
 
+    // O aviso diz "os dados abaixo vieram do arquivo que você enviou". Sem
+    // currículo salvo isso é falso, e a caixa ainda apareceria ao lado do
+    // "Já tem um currículo pronto?", que só existe quando NÃO há currículo.
+    assert.match(
+      fonte,
+      /\{volta && existing && \(/,
+      'o aviso precisa exigir currículo salvo, senão afirma um envio que não houve'
+    );
+
     // O rótulo entra no BOTÃO, nunca numa frase que exija que ele seja verbo.
     // "antes de analisar currículo" lê bem; "antes de carta de apresentação"
     // não é português — e três dos seis rótulos são substantivos.
