@@ -301,13 +301,18 @@ Quem recebe a visita do navegador, faz HTTPS e encaminha para a porta 3000
 
 **Ponto crítico deste passo:** o padrão de fábrica do Nginx aceita corpo de
 requisição de até **1 MB**. Este projeto valida upload de foto/PDF até
-`MAX_UPLOAD_BYTES` (4 MB, definido em `src/lib/files/limits.ts`) e permite
-até `4.4mb` no corpo de uma Server Action (`bodySizeLimit`, em
+`MAX_UPLOAD_BYTES` (8 MB, definido em `src/lib/files/limits.ts`) e permite
+até `8.5mb` no corpo de uma Server Action (`bodySizeLimit`, em
 `next.config.mjs`). Sem ajustar o Nginx, uma foto de currículo tirada no
 celular recebe **413 Request Entity Too Large** do Nginx, antes de chegar
 ao app e antes de qualquer mensagem nossa aparecer — o mesmo tipo de erro
 sem explicação que este projeto já teve que corrigir uma vez do lado da
 Vercel (ver o histórico em `src/lib/files/limits.ts`).
+
+Este caminho (VPS + Nginx seu) é o **único** em que o teto do proxy é
+responsabilidade sua. No caminho que está em produção hoje — Web App Node.js,
+ver `deploy-web-app-nodejs.md` — o proxy é da Hostinger e foi medido passando
+20 MB sem cortar.
 
 ```bash
 # Instala o Nginx.
@@ -338,10 +343,10 @@ server {
     server_name curriculoproia.online www.curriculoproia.online;
 
     # TETO DE UPLOAD. O padrão do Nginx é 1m e cortaria a foto do
-    # currículo com 413 antes do app sequer ser chamado. 5m fica acima do
-    # bodySizeLimit do Next (4.4mb, em next.config.mjs), com a mesma folga
+    # currículo com 413 antes do app sequer ser chamado. 10m fica acima do
+    # bodySizeLimit do Next (8.5mb, em next.config.mjs), com a mesma folga
     # que o projeto já usa entre os próprios tetos internos.
-    client_max_body_size 5m;
+    client_max_body_size 10m;
 
     location / {
         proxy_pass http://127.0.0.1:3000;

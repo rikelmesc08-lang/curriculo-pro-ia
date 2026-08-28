@@ -264,13 +264,31 @@ inteiros — conferidos um a um contra a Vercel, e idênticos nos dois:
 `X-Content-Type-Options`, `X-Frame-Options`. `X-Powered-By` está ausente nos
 dois, como `poweredByHeader: false` pede. **O hcdn mexe só na CSP.**
 
-> **Não testado:** o teto de tamanho de corpo do hcdn. No VPS o gargalo é o
-> `client_max_body_size` do Nginx (padrão de fábrica 1 MB, armadilha
-> documentada em `next.config.mjs`); aqui não há Nginx seu, e não se sabe onde
-> a Hostinger corta. A importação de currículo por foto aceita até 4 MB
-> (`src/lib/files/limits.ts`). **Antes de anunciar a importação por foto,
-> envie uma foto real de ~3 MB pela tela `/app/curriculo/importar` e veja se
-> ela passa** — se voltar 413, o corte é da CDN e não tem correção no código.
+> **Medido em 28/08/2026: o hcdn NÃO corta corpo de requisição.** Esta era a
+> incógnita do caminho — no VPS o gargalo é o `client_max_body_size` do Nginx
+> (padrão de fábrica 1 MB), mas aqui não há Nginx seu e não se sabia onde a
+> Hostinger cortava. Foram enviados a `https://curriculoproia.online` POSTs com
+> corpo de 1, 2, 3, 4, 5, 6, 8, 12 e 20 MB: **as nove respostas foram o 413 do
+> próprio app**, nenhuma um 413 de borda. 20 MB atravessam inteiros.
+>
+> Foi o que permitiu subir `MAX_UPLOAD_BYTES` de 4 para **8 MB**
+> (`src/lib/files/limits.ts`) — o 4 MB existia só por causa do corte de ~4,5 MB
+> da Vercel, que saiu do caminho junto com a Vercel.
+>
+> **Como repetir a medida** se a hospedagem mudar, sem precisar de sessão nem
+> de arquivo de verdade:
+>
+> ```bash
+> head -c 12582912 /dev/zero | tr '\0' 'a' > /tmp/b.bin
+> curl -s -o /dev/stdout -w "\n%{http_code}\n" -X POST \
+>   https://curriculoproia.online/api/pagamento/webhook \
+>   -H "Content-Type: application/json" --data-binary @/tmp/b.bin
+> ```
+>
+> `413` com corpo `{"erro":"corpo grande demais"}` significa que a borda
+> **passou** e quem recusou foi o app (aquela rota tem teto próprio de 64 KB,
+> de propósito). Um 413 em HTML, ou qualquer resposta que não seja JSON nosso,
+> significa que o corte é da borda — e aí o teto do upload precisa descer.
 
 ---
 

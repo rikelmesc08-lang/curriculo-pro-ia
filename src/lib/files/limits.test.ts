@@ -19,6 +19,17 @@ import {
  * produção — porque em desenvolvimento não existe borda cortando requisição.
  */
 
+/**
+ * O `bodySizeLimit` lido do arquivo, e não importado: importar executaria o
+ * config inteiro, e o que interessa aqui é só o número declarado nele.
+ */
+function bodySizeLimitBytes(): number {
+  const config = readFileSync(new URL('../../../next.config.mjs', import.meta.url), 'utf8');
+  const achado = /bodySizeLimit:\s*'([\d.]+)mb'/.exec(config);
+  assert.ok(achado, 'bodySizeLimit não encontrado em next.config.mjs');
+  return Number(achado[1]) * 1024 * 1024;
+}
+
 describe('tetos de upload — a relação entre eles é o que importa', () => {
   it('o nosso teto cabe dentro do que a plataforma aceita', () => {
     assert.ok(
@@ -31,7 +42,15 @@ describe('tetos de upload — a relação entre eles é o que importa', () => {
     // O `multipart/form-data` soma fronteiras, cabeçalhos de parte e metadados.
     // A documentação do Next sugere contar 10–20 KB; exigimos 100 KB de folga
     // para que um ajuste distraído no teto não encoste na borda.
-    const folga = PLATAFORMA_BYTES - MAX_UPLOAD_BYTES;
+    //
+    // A COMPARAÇÃO É CONTRA O `bodySizeLimit`, E NÃO CONTRA `PLATAFORMA_BYTES`.
+    // Quem mede o corpo inteiro — arquivo MAIS envelope — é o Next, neste
+    // campo; a nossa validação mede só o arquivo. Enquanto a plataforma era a
+    // borda da Vercel os dois números ficavam colados e a distinção não
+    // aparecia. Hoje `PLATAFORMA_BYTES` é o teto do provedor de IA, quase o
+    // dobro do nosso, e comparar contra ele passaria sempre — um teste que não
+    // pode falhar não protege nada.
+    const folga = bodySizeLimitBytes() - MAX_UPLOAD_BYTES;
     assert.ok(folga >= 100 * 1024, `folga de apenas ${folga} bytes`);
   });
 
@@ -42,14 +61,7 @@ describe('tetos de upload — a relação entre eles é o que importa', () => {
   });
 
   it('o bodySizeLimit do Next fica entre o nosso teto e o da plataforma', () => {
-    // Lido do arquivo, e não importado: importar executaria o config inteiro,
-    // e o que interessa aqui é só o número declarado nele.
-    const config = readFileSync(new URL('../../../next.config.mjs', import.meta.url), 'utf8');
-    const achado = /bodySizeLimit:\s*'([\d.]+)mb'/.exec(config);
-
-    assert.ok(achado, 'bodySizeLimit não encontrado em next.config.mjs');
-
-    const bytes = Number(achado[1]) * 1024 * 1024;
+    const bytes = bodySizeLimitBytes();
     assert.ok(
       bytes > MAX_UPLOAD_BYTES,
       'precisa ser MAIOR que o nosso teto, para quem recusar ser a nossa validação'
@@ -62,20 +74,24 @@ describe('tetos de upload — a relação entre eles é o que importa', () => {
 });
 
 describe('mensagemDeTamanho', () => {
+  // NOVE MEGABYTES, E NÃO SEIS. Estes casos precisam ser arquivos que a
+  // validação DE FATO recusa; 6 MB era recusado quando o teto era 4 MB e hoje
+  // passa. Um teste de mensagem de recusa montado sobre um arquivo aceito
+  // continuaria verde para sempre sem descrever nada que aconteça.
   it('diz o tamanho do arquivo e o limite, os dois em MB', () => {
-    const texto = mensagemDeTamanho(6 * 1024 * 1024, true);
-    assert.match(texto, /6,0 MB/);
-    assert.match(texto, /4,0 MB/);
+    const texto = mensagemDeTamanho(9 * 1024 * 1024, true);
+    assert.match(texto, /9,0 MB/);
+    assert.match(texto, /8,0 MB/);
   });
 
   it('a foto ganha a saída do Safari, que é o caso do iPhone', () => {
     // HEIC fora do Safari não é decodificado, então a foto sobe inteira. Mandar
     // "tire de novo menor" não resolve: o formato é que trava a redução.
-    assert.match(mensagemDeTamanho(6 * 1024 * 1024, true), /Safari/);
+    assert.match(mensagemDeTamanho(9 * 1024 * 1024, true), /Safari/);
   });
 
   it('o PDF não fala de Safari, que ali não tem nada a ver', () => {
-    const texto = mensagemDeTamanho(6 * 1024 * 1024, false);
+    const texto = mensagemDeTamanho(9 * 1024 * 1024, false);
     assert.doesNotMatch(texto, /Safari/);
     assert.match(texto, /qualidade menor/);
   });
