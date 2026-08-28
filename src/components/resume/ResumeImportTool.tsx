@@ -65,7 +65,18 @@ function contagem(content: ResumeContent): { label: string; total: number }[] {
   ].filter((item) => item.total > 0);
 }
 
-export function ResumeImportTool({ existingResumeId }: { existingResumeId: string | null }) {
+export function ResumeImportTool({
+  existingResumeId,
+  destino,
+}: {
+  existingResumeId: string | null;
+  /**
+   * Para onde ir depois de salvar. Vem JÁ VALIDADO da página (`rotaDeRetorno`),
+   * nunca direto da URL — ver a defesa contra redirecionamento aberto em
+   * `AppNav.ts`.
+   */
+  destino: string;
+}) {
   const router = useRouter();
   const [modo, setModo] = useState<Modo>('arquivo');
   const [texto, setTexto] = useState('');
@@ -150,12 +161,25 @@ export function ResumeImportTool({ existingResumeId }: { existingResumeId: strin
     iniciarSalvamento(async () => {
       const resultado = await saveResumeAction(existingResumeId, importado.content);
       if (resultado.ok) {
-        router.push('/app/curriculo');
+        /**
+         * VOLTA PARA ONDE A PESSOA QUERIA IR, e não para o editor.
+         *
+         * Este destino era `/app/curriculo` fixo. Quem clicava em "Analisar
+         * currículo" sem ter currículo salvo era mandado para cá, importava — e
+         * aterrissava no editor, sem análise nenhuma na tela e sem nada
+         * indicando que a análise ainda existia. A intenção com que a pessoa
+         * começou se perdia no meio do caminho, e o sintoma relatado foi
+         * "estou para analisar o currículo e só aparece para criar".
+         *
+         * `destino` já vem validado do servidor contra a lista de ferramentas
+         * (`rotaDeRetorno`, em AppNav.ts) — não é o `?voltar=` cru da URL.
+         */
+        router.push(destino);
       } else {
         setErroAoSalvar(resultado.error);
       }
     });
-  }, [existingResumeId, importado, router]);
+  }, [destino, existingResumeId, importado, router]);
 
   return (
     <div className="space-y-5">

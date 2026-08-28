@@ -38,7 +38,7 @@ export default async function ResumeReviewPage() {
       {resume ? (
         <ResumeReviewTool resume={resume} />
       ) : (
-        <NoResumeNotice tool="A análise completa" />
+        <NoResumeNotice href="/app/analise" />
       )}
     </>
   );

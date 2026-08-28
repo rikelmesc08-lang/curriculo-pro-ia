@@ -30,7 +30,7 @@ export default async function InterviewPage() {
         title="Preparação para entrevista"
         description="Dez perguntas prováveis, com orientação de resposta baseada no que você realmente viveu."
       />
-      {resume ? <InterviewTool resume={toContent(resume)} /> : <NoResumeNotice tool="A preparação para entrevista" />}
+      {resume ? <InterviewTool resume={toContent(resume)} /> : <NoResumeNotice href="/app/entrevista" />}
     </>
   );
 }

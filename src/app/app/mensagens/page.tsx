@@ -30,7 +30,7 @@ export default async function RecruiterMessagePage() {
         title="Mensagem para recrutador"
         description="Seis situações comuns, com mensagens curtas e profissionais para cada uma."
       />
-      {resume ? <RecruiterMessageTool resume={toContent(resume)} /> : <NoResumeNotice tool="O gerador de mensagens" />}
+      {resume ? <RecruiterMessageTool resume={toContent(resume)} /> : <NoResumeNotice href="/app/mensagens" />}
     </>
   );
 }

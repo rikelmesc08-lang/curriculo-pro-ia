@@ -29,7 +29,7 @@ export default async function OptimizePage() {
         title="Otimizar currículo"
         description="Gere uma versão do seu currículo direcionada a uma vaga específica. Você revisa antes de qualquer coisa ser salva."
       />
-      {resume ? <OptimizeTool resume={resume} /> : <NoResumeNotice tool="A otimização" />}
+      {resume ? <OptimizeTool resume={resume} /> : <NoResumeNotice href="/app/otimizar" />}
     </>
   );
 }
